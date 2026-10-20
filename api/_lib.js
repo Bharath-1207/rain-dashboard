@@ -5,10 +5,14 @@ let K = process.env.WU_API_KEY || KNOWN_KEY;
 const RU = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const RT = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 const STATIONS = [
-  { id: 'IPONDI5', name: 'Pondy 5' }, { id: 'IPONDI9', name: 'Pondy 9' }, { id: 'IPONDI10', name: 'Pondy 10' },
-  { id: 'IAUROV6', name: 'Auroville 6' }, { id: 'IAUROV10', name: 'Auroville 10' }, { id: 'IAUROV11', name: 'Auroville 11' },
-  { id: 'IVANUR5', name: 'Vanur 5' },
-  { id: 'AMBIENT', name: 'Ambient', amb: '7fc335428501d47401fe97b23cd0e7fd' },
+  { id: 'IPONDI5', name: 'Mothilal Nagar' },
+  { id: 'IPONDI9', name: 'Heritage Town' },
+  { id: 'IPONDI10', name: 'Pondicherry' },
+  { id: 'IAUROV6', name: 'Bommayapalayam' },
+  { id: 'IAUROV10', name: 'Sarvamangalam' },
+  { id: 'IAUROV11', name: 'Auro Orchard' },
+  { id: 'IVANUR5', name: 'Puthurai' },
+  { id: 'AMBIENT', name: 'Shreelakam Lawspet', amb: '7fc335428501d47401fe97b23cd0e7fd' },
 ];
 // 08:30 IST = 03:00 UTC. Instant t (sec) belongs to the day ending at the first 03:00 UTC >= t.
 // key(t): IST calendar date (YYYY-MM-DD) of the 08:30 IST rain-day window that contains epoch t.

@@ -17,6 +17,7 @@ async function wuStation(s, full) {
   return { rate: last?.metric?.precipRate || 0, last: last?.epoch || 0, p5: L.toPts(o5), pH };
 }
 async function nameOf(s, d) {
+  if (s.name) return s.name;
   if (d.name) return d.name;
   try {
     const c = (await L.redis([['HGET', 'names', s.id]]))[0]; if (c) return c;
@@ -31,12 +32,7 @@ async function one(s, full, now, todayKey) {
   if (d.pH && d.pH.length) { const cut = first; list = L.incs(d.pH).filter(i => i.t1 <= cut).concat(list); first = Math.min(first, d.pH[0].t); }
   if (list.length) await L.writeDays(s.id, L.toDays(list), first);
 
-  const ld = d.ld;
-  if (ld) {
-    const ambToday = +((ld.dailyrainin || 0) * 25.4).toFixed(2);
-    try { await L.redis([['HSET', 'rain:' + s.id, todayKey, ambToday.toFixed(2)]]); } catch (e) {}
-  }
-
+  const ws = Math.floor((now - 10800) / 86400) * 86400 + 10800; // 08:30 IST window start epoch
   const raw = (await L.redis([['HGETALL', 'rain:' + s.id]]))[0] || {}, h = {};
   // Upstash REST returns HGETALL as a plain object {field:val,...}; some proxies use a flat array.
   if (Array.isArray(raw)) {
@@ -51,17 +47,27 @@ async function one(s, full, now, todayKey) {
   let month = sum(todayKey.slice(0, 7));
   let todayVal = h[todayKey] || 0;
 
+  const ld = d.ld;
   if (ld) {
-    const ambToday = (ld.dailyrainin || 0) * 25.4;
+    const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
+    // Ambient hardware dailyrainin resets at midnight, so we verify if rain occurred within current 8:30 AM window:
+    if (lr >= ws) {
+      const ambToday = (ld.dailyrainin || 0) * 25.4;
+      todayVal = Math.max(todayVal, ambToday);
+      try { await L.redis([['HSET', 'rain:' + s.id, todayKey, todayVal.toFixed(2)]]); } catch (e) {}
+    } else {
+      // Last rain was before 8:30 AM (in the previous day's window), so current 8:30 AM window is strictly 0 mm
+      todayVal = 0;
+    }
+
     const ambMonth = (ld.monthlyrainin || 0) * 25.4;
     const ambYear = (ld.yearlyrainin || 0) * 25.4;
-    todayVal = Math.max(todayVal, ambToday);
     month = Math.max(month, ambMonth);
     year = Math.max(year, ambYear);
     if (m >= 10) nem = Math.max(nem, ambMonth);
   }
 
-  const ws = Math.floor((now - 10800) / 86400) * 86400 + 10800, series = [];
+  const series = [];
   for (let t = ws + 1800; t - 1800 < now && t <= ws + 86400; t += 1800) {
     let c = 0;
     if (list.length) {
