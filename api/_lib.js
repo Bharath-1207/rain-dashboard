@@ -7,7 +7,7 @@ const RT = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN
 const STATIONS = [
   { id: 'IPONDI5', name: 'Mothilal Nagar' },
   { id: 'IPONDI9', name: 'Heritage Town' },
-  { id: 'IPONDI10', name: 'Pondicherry' },
+  { id: 'IPONDI10', name: 'Poornakuppam' },
   { id: 'IAUROV6', name: 'Bommayapalayam' },
   { id: 'IAUROV10', name: 'Sarvamangalam' },
   { id: 'IAUROV11', name: 'Auro Orchard' },
