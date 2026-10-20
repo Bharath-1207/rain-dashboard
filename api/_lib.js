@@ -1,5 +1,8 @@
 // Shared helpers. Rain day = 08:30 IST -> next 08:30 IST (IMD), labelled by the END date.
-let K = process.env.WU_API_KEY || null; const RU = process.env.UPSTASH_REDIS_REST_URL, RT = process.env.UPSTASH_REDIS_REST_TOKEN;
+let K = process.env.WU_API_KEY || null;
+// Vercel KV marketplace injects KV_REST_API_URL/TOKEN; direct Upstash uses UPSTASH_REDIS_REST_*.
+const RU = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const RT = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 const STATIONS = [
   { id: 'IPONDI5', name: 'Pondy 5' }, { id: 'IPONDI9', name: 'Pondy 9' }, { id: 'IPONDI10', name: 'Pondy 10' },
   { id: 'IAUROV6', name: 'Auroville 6' }, { id: 'IAUROV10', name: 'Auroville 10' }, { id: 'IAUROV11', name: 'Auroville 11' },
