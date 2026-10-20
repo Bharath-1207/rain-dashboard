@@ -11,8 +11,16 @@ async function ambient(s) {
   return { name: dev.info && dev.info.name, rate: (ld.hourlyrainin || 0) * 25.4, last: Math.floor((ld.dateutc || Date.now()) / 1000), p5: pts, pH: null, ld };
 }
 async function wuStation(s, full) {
-  const o5 = await L.wu('observations/all/1day', s.id);
-  const last = o5[o5.length - 1];
+  const [o5, cur] = await Promise.all([
+    L.wu('observations/all/1day', s.id),
+    L.wu('observations/current', s.id).catch(() => [])
+  ]);
+  const c = cur[0];
+  const lastAll = o5[o5.length - 1];
+  if (c && c.epoch && (!lastAll || c.epoch > lastAll.epoch)) {
+    o5.push(c);
+  }
+  const last = c || lastAll;
   const pH = full ? L.toPts(await L.wu('observations/hourly/7day', s.id)) : null;
   return { rate: last?.metric?.precipRate || 0, last: last?.epoch || 0, p5: L.toPts(o5), pH };
 }
@@ -85,6 +93,8 @@ async function one(s, full, now, todayKey) {
 module.exports = async (req, res) => {
   const now = Math.floor(Date.now() / 1000), todayKey = L.key(now), full = req.query.full === '1';
   const out = await Promise.all(L.STATIONS.map(s => one(s, full, now, todayKey).catch(e => ({ id: s.id, name: s.id, error: e.message }))));
-  res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=300');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
   res.json({ updated: now, todayKey, windowStart: Math.floor((now - 10800) / 86400) * 86400 + 10800, stations: out });
 };

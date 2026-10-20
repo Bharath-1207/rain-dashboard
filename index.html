@@ -22,20 +22,24 @@ h1{font-size:22px;margin:0}.sub{color:var(--mut);font-size:13px}
 .stale{color:#e0a458;font-size:12px}.err{color:#ff7a7a;font-size:13px}
 #chartbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;height:min(70vh,520px)}
 .hide{display:none}
+.btn-ref{background:var(--card);color:var(--hd);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font:600 13px Outfit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .2s}
+.btn-ref:hover{background:var(--line);border-color:var(--hd)}
+.btn-ref.spin{opacity:.7;pointer-events:none}
+.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#5ce0a0;margin-right:6px;box-shadow:0 0 8px #5ce0a0}
 </style></head><body>
 <header><div><h1>Pondy &amp; Auroville rain network</h1>
-<div class="sub" id="meta">Loading…</div></div>
-<div class="tabs"><button id="t1" class="on">Stations</button><button id="t2">24h comparison</button></div></header>
+<div class="sub" id="meta"><span class="live-dot"></span>Loading live data…</div></div>
+<div class="tabs"><button id="btn-ref" class="btn-ref" title="Fetch latest live PWS data now">↻ Refresh</button><button id="t1" class="on">Stations</button><button id="t2">24h comparison</button></div></header>
 <div class="grid" id="grid"></div>
 <div id="chartbox" class="hide"><canvas id="cv"></canvas></div>
 <script>
-const $=id=>document.getElementById(id);let chart,data;
+const $=id=>document.getElementById(id);let chart,data,loading=false;
 const pal=['#6b9cff','#4fd1ff','#a35cf0','#ff8a5c','#5ce0a0','#ffd25c','#ff5c8a','#c0c8dc'];
-const fmt=t=>new Date(t*1000).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+const fmt=t=>new Date(t*1000).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});
 function render(){
-  $('meta').textContent=`Rain day ${data.todayKey} (8:30 am to 8:30 am IST) · updated ${fmt(data.updated)} IST`;
+  $('meta').innerHTML=`<span class="live-dot"></span>Rain day <b>${data.todayKey}</b> (8:30 am to 8:30 am IST) · updated <b>${fmt(data.updated)} IST</b> <span class="sub" style="font-size:11px">· live auto-update 30s</span>`;
   $('grid').innerHTML=data.stations.map(s=>s.error?`<div class="card"><h2>${s.name}</h2><div class="err">Could not load: ${s.error}</div></div>`:
-  `<div class="card"><h2>${s.name}</h2><div class="id">${s.id}${s.ageMin>45?` · <span class="stale">last report ${s.ageMin} min ago</span>`:''}</div>
+  `<div class="card"><h2>${s.name}</h2><div class="id">${s.id}${s.ageMin>45?` · <span class="stale">last report ${s.ageMin} min ago</span>`:s.ageMin<=2?` · <span style="color:#5ce0a0">just reported</span>`:''}</div>
   <div class="top"><div><span class="big">${s.today}</span><span class="u">mm</span></div>
   <div class="rr ${s.rate>0?'wet':''}"><small class="sub">Rain rate</small><br><b>${s.rate}</b><span class="u">mm/h</span></div></div>
   <div class="row"><div><small>Monthly</small><b>${s.month} mm</b></div><div><small>NEM</small><b>${s.nem} mm</b></div><div><small>Yearly</small><b>${s.year} mm</b></div></div></div>`).join('');
@@ -46,7 +50,24 @@ function render(){
    plugins:{legend:{labels:{color:'#c0c8dc'}},title:{display:true,text:'Cumulative rainfall since 8:30 am (mm)',color:'#c0c8dc'}},
    scales:{x:{ticks:{color:'#8b94ab',maxTicksLimit:12},grid:{color:'#232c42'}},y:{beginAtZero:true,title:{display:true,text:'mm',color:'#8b94ab'},ticks:{color:'#8b94ab'},grid:{color:'#232c42'}}}}});
 }
-async function load(){try{data=await (await fetch('/api/rain')).json();render()}catch(e){$('meta').textContent='Could not load data. Retrying…'}}
+async function load(){
+  if(loading)return;loading=true;
+  $('btn-ref').classList.add('spin');
+  $('btn-ref').textContent='Updating…';
+  try{
+    data=await (await fetch('/api/rain?t='+Date.now())).json();
+    render();
+  }catch(e){
+    $('meta').textContent='Could not load data. Retrying…';
+  }finally{
+    loading=false;
+    $('btn-ref').classList.remove('spin');
+    $('btn-ref').textContent='↻ Refresh';
+  }
+}
 function tab(n){$('grid').classList.toggle('hide',n==2);$('chartbox').classList.toggle('hide',n==1);$('t1').classList.toggle('on',n==1);$('t2').classList.toggle('on',n==2);if(chart)chart.resize()}
-$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);load();setInterval(load,300000);
+$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);
+$('btn-ref').onclick=()=>load();
+window.addEventListener('focus',()=>load());
+load();setInterval(load,30000);
 </script></body></html>

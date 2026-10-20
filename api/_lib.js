@@ -36,7 +36,7 @@ const getKey = async force => {
     try {
       const testRes = await fetch(`https://api.weather.com/v2/pws/observations/current?stationId=IPONDI5&format=json&units=m&numericPrecision=decimal&apiKey=${candidate}`);
       if (testRes.status === 200) return (K = candidate);
-    } catch (e) {}
+    } catch (e) { }
   }
   return (K = KNOWN_KEY);
 };
