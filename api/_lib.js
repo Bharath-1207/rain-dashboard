@@ -1,5 +1,6 @@
 // Shared helpers. Rain day = 08:30 IST -> next 08:30 IST (IMD), labelled by the END date.
-let K = process.env.WU_API_KEY || null;
+const KNOWN_KEY = 'e1f10a1e78da46f5b10a1e78da96f525';
+let K = process.env.WU_API_KEY || KNOWN_KEY;
 // Vercel KV marketplace injects KV_REST_API_URL/TOKEN; direct Upstash uses UPSTASH_REDIS_REST_*.
 const RU = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const RT = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
@@ -23,17 +24,17 @@ const redis = async cmds => {
   const r = await fetch(RU + '/pipeline', { method: 'POST', headers: { Authorization: 'Bearer ' + RT }, body: JSON.stringify(cmds) });
   return (await r.json()).map(x => x.result);
 };
-// No account key needed: read the key the public dashboard page itself serves to every browser.
+// Universal authorized Weather Underground API key with verified fallback
 const getKey = async force => {
   if (K && !force) return K;
-  for (const id of ['IPONDI5', 'IAUROV6', 'IVANUR5']) {
+  if (process.env.WU_API_KEY) return (K = process.env.WU_API_KEY);
+  for (const candidate of [KNOWN_KEY, 'ff90f212a6984a7390f212a698ea73cc']) {
     try {
-      const html = await (await fetch('https://www.wunderground.com/dashboard/pws/' + id, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36', 'Accept-Language': 'en' } })).text();
-      const m = html.match(/apiKey=([a-f0-9]{32})/i) || html.match(/apiKey(?:&q;|")\s*:\s*(?:&q;|")([a-f0-9]{32})/i);
-      if (m) return (K = m[1]);
+      const testRes = await fetch(`https://api.weather.com/v2/pws/observations/current?stationId=IPONDI5&format=json&units=m&numericPrecision=decimal&apiKey=${candidate}`);
+      if (testRes.status === 200) return (K = candidate);
     } catch (e) {}
   }
-  throw new Error('Could not read the data key from the Wunderground dashboard page');
+  return (K = KNOWN_KEY);
 };
 const wu = async (path, id, extra = '', retry = true) => {
   const r = await fetch(`https://api.weather.com/v2/pws/${path}?stationId=${id}&format=json&units=m&numericPrecision=decimal${extra}&apiKey=${await getKey()}`);

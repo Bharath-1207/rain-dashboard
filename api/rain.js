@@ -3,12 +3,12 @@ const L = require('./_lib');
 async function ambient(s) {
   const base = 'https://lightning.ambientweather.net/';
   const dev = (await (await fetch(base + 'devices?public.slug=' + s.amb)).json()).data[0];
-  const ld = dev.lastData; let pts = [];
+  const ld = dev.lastData || {}; let pts = [];
   try { // best effort: recent history of the public dashboard
     const h = await (await fetch(`${base}device-data?public.slug=${s.amb}&macAddress=${dev.macAddress}&limit=300`)).json();
     pts = (Array.isArray(h) ? h : h.data || []).map(x => ({ t: Math.floor(x.dateutc / 1000), v: (x.dailyrainin || 0) * 25.4 })).sort((a, b) => a.t - b.t);
   } catch (e) {}
-  return { name: dev.info && dev.info.name, rate: (ld.hourlyrainin || 0) * 25.4, last: Math.floor(ld.dateutc / 1000), p5: pts, pH: null };
+  return { name: dev.info && dev.info.name, rate: (ld.hourlyrainin || 0) * 25.4, last: Math.floor((ld.dateutc || Date.now()) / 1000), p5: pts, pH: null, ld };
 }
 async function wuStation(s, full) {
   const o5 = await L.wu('observations/all/1day', s.id);
@@ -29,7 +29,14 @@ async function one(s, full, now, todayKey) {
   const d = s.amb ? await ambient(s) : await wuStation(s, full);
   let list = L.incs(d.p5), first = d.p5[0]?.t ?? Infinity;
   if (d.pH && d.pH.length) { const cut = first; list = L.incs(d.pH).filter(i => i.t1 <= cut).concat(list); first = Math.min(first, d.pH[0].t); }
-  await L.writeDays(s.id, L.toDays(list), first);
+  if (list.length) await L.writeDays(s.id, L.toDays(list), first);
+
+  const ld = d.ld;
+  if (ld) {
+    const ambToday = +((ld.dailyrainin || 0) * 25.4).toFixed(2);
+    try { await L.redis([['HSET', 'rain:' + s.id, todayKey, ambToday.toFixed(2)]]); } catch (e) {}
+  }
+
   const raw = (await L.redis([['HGETALL', 'rain:' + s.id]]))[0] || {}, h = {};
   // Upstash REST returns HGETALL as a plain object {field:val,...}; some proxies use a flat array.
   if (Array.isArray(raw)) {
@@ -39,15 +46,35 @@ async function one(s, full, now, todayKey) {
   }
   const sum = p => Object.entries(h).filter(([k]) => k.startsWith(p)).reduce((a, [, v]) => a + v, 0);
   const y = todayKey.slice(0, 4), m = +todayKey.slice(5, 7);
-  const nem = m >= 10 ? sum(y + '-10') + sum(y + '-11') + sum(y + '-12') : 0;
+  let nem = m >= 10 ? sum(y + '-10') + sum(y + '-11') + sum(y + '-12') : 0;
+  let year = sum(y);
+  let month = sum(todayKey.slice(0, 7));
+  let todayVal = h[todayKey] || 0;
+
+  if (ld) {
+    const ambToday = (ld.dailyrainin || 0) * 25.4;
+    const ambMonth = (ld.monthlyrainin || 0) * 25.4;
+    const ambYear = (ld.yearlyrainin || 0) * 25.4;
+    todayVal = Math.max(todayVal, ambToday);
+    month = Math.max(month, ambMonth);
+    year = Math.max(year, ambYear);
+    if (m >= 10) nem = Math.max(nem, ambMonth);
+  }
+
   const ws = Math.floor((now - 10800) / 86400) * 86400 + 10800, series = [];
   for (let t = ws + 1800; t - 1800 < now && t <= ws + 86400; t += 1800) {
-    let c = 0; for (const i of list) { const a = Math.max(i.t0, ws), b = Math.min(i.t1, t); if (b > a) c += i.d * (b - a) / (i.t1 - i.t0); }
+    let c = 0;
+    if (list.length) {
+      for (const i of list) { const a = Math.max(i.t0, ws), b = Math.min(i.t1, t); if (b > a) c += i.d * (b - a) / (i.t1 - i.t0); }
+    } else if (ld && todayVal > 0) {
+      const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : ws + 3600;
+      if (t >= lr) c = todayVal;
+    }
     series.push(+c.toFixed(2));
   }
   const r = n => +n.toFixed(1);
-  return { id: s.id, name: await nameOf(s, d), rate: r(d.rate), ageMin: Math.round((now - d.last) / 60), today: r(h[todayKey] || 0),
-    month: r(sum(todayKey.slice(0, 7))), nem: r(nem), year: r(sum(y)), series };
+  return { id: s.id, name: await nameOf(s, d), rate: r(d.rate), ageMin: Math.round((now - d.last) / 60), today: r(todayVal),
+    month: r(month), nem: r(nem), year: r(year), series };
 }
 module.exports = async (req, res) => {
   const now = Math.floor(Date.now() / 1000), todayKey = L.key(now), full = req.query.full === '1';
