@@ -1,0 +1,4 @@
+{
+  "functions": { "api/*.js": { "maxDuration": 60 } },
+  "crons": [{ "path": "/api/rain?full=1", "schedule": "30 3 * * *" }]
+}

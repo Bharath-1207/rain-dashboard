@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pondy &amp; Auroville rain network</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0f1420;--card:#151b2b;--line:#232c42;--tx:#f3f5fa;--mut:#8b94ab;--hd:#6b9cff;--rr:#3a63e6;--nem:#a35cf0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font-family:Outfit,system-ui,sans-serif;padding:20px;max-width:1280px;margin-inline:auto}
+header{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;margin-bottom:18px}
+h1{font-size:22px;margin:0}.sub{color:var(--mut);font-size:13px}
+.tabs{display:flex;gap:6px}.tabs button{background:var(--card);color:var(--mut);border:1px solid var(--line);padding:8px 14px;border-radius:8px;font:600 14px Outfit;cursor:pointer}
+.tabs button.on{color:var(--tx);border-color:var(--hd)}button:focus-visible{outline:2px solid var(--hd)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.card h2{font-size:15px;color:var(--hd);margin:0 0 2px;font-weight:700}.id{font-size:12px;color:var(--mut)}
+.top{display:flex;justify-content:space-between;align-items:flex-end;margin:14px 0}
+.big{font-size:52px;font-weight:600;line-height:1}.u{font-size:15px;color:var(--mut);margin-left:4px}
+.rr{text-align:right}.rr b{font-size:26px;color:var(--rr)}.rr.wet b{color:#4fd1ff}
+.row{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);padding-top:12px}
+.row div{text-align:center}.row small{display:block;color:var(--mut);font-size:12px}.row b{font-size:16px}
+.stale{color:#e0a458;font-size:12px}.err{color:#ff7a7a;font-size:13px}
+#chartbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;height:min(70vh,520px)}
+.hide{display:none}
+</style></head><body>
+<header><div><h1>Pondy &amp; Auroville rain network</h1>
+<div class="sub" id="meta">Loading…</div></div>
+<div class="tabs"><button id="t1" class="on">Stations</button><button id="t2">24h comparison</button></div></header>
+<div class="grid" id="grid"></div>
+<div id="chartbox" class="hide"><canvas id="cv"></canvas></div>
+<script>
+const $=id=>document.getElementById(id);let chart,data;
+const pal=['#6b9cff','#4fd1ff','#a35cf0','#ff8a5c','#5ce0a0','#ffd25c','#ff5c8a','#c0c8dc'];
+const fmt=t=>new Date(t*1000).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+function render(){
+  $('meta').textContent=`Rain day ${data.todayKey} (8:30 am to 8:30 am IST) · updated ${fmt(data.updated)} IST`;
+  $('grid').innerHTML=data.stations.map(s=>s.error?`<div class="card"><h2>${s.name}</h2><div class="err">Could not load: ${s.error}</div></div>`:
+  `<div class="card"><h2>${s.name}</h2><div class="id">${s.id}${s.ageMin>45?` · <span class="stale">last report ${s.ageMin} min ago</span>`:''}</div>
+  <div class="top"><div><span class="big">${s.today}</span><span class="u">mm</span></div>
+  <div class="rr ${s.rate>0?'wet':''}"><small class="sub">Rain rate</small><br><b>${s.rate}</b><span class="u">mm/h</span></div></div>
+  <div class="row"><div><small>Monthly</small><b>${s.month} mm</b></div><div><small>NEM</small><b>${s.nem} mm</b></div><div><small>Yearly</small><b>${s.year} mm</b></div></div></div>`).join('');
+  const labels=Array.from({length:48},(_,i)=>{const m=510+30*(i+1);return String(Math.floor(m/60)%24).padStart(2,'0')+':'+String(m%60).padStart(2,'0')});
+  const ds=data.stations.filter(s=>!s.error).map((s,i)=>({label:s.name,data:s.series,borderColor:pal[i%8],backgroundColor:pal[i%8],tension:.25,pointRadius:0,borderWidth:2}));
+  if(chart)chart.destroy();
+  chart=new Chart($('cv'),{type:'line',data:{labels,datasets:ds},options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+   plugins:{legend:{labels:{color:'#c0c8dc'}},title:{display:true,text:'Cumulative rainfall since 8:30 am (mm)',color:'#c0c8dc'}},
+   scales:{x:{ticks:{color:'#8b94ab',maxTicksLimit:12},grid:{color:'#232c42'}},y:{beginAtZero:true,title:{display:true,text:'mm',color:'#8b94ab'},ticks:{color:'#8b94ab'},grid:{color:'#232c42'}}}}});
+}
+async function load(){try{data=await (await fetch('/api/rain')).json();render()}catch(e){$('meta').textContent='Could not load data. Retrying…'}}
+function tab(n){$('grid').classList.toggle('hide',n==2);$('chartbox').classList.toggle('hide',n==1);$('t1').classList.toggle('on',n==1);$('t2').classList.toggle('on',n==2);if(chart)chart.resize()}
+$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);load();setInterval(load,300000);
+</script></body></html>
