@@ -10,21 +10,62 @@ async function ambient(s, now, ws) {
   const ageMin = Math.round((now - lastEpoch) / 60);
   const rate = +((ld.hourlyrainin || 0) * 25.4).toFixed(1);
   const calDay = +((ld.dailyrainin || 0) * 25.4).toFixed(1);
+  // Hardware-level accumulators that NEVER drop to 0 at 8:30 AM:
   const month = +((ld.monthlyrainin || 0) * 25.4).toFixed(1);
   const year = +((ld.yearlyrainin || 0) * 25.4).toFixed(1);
-  const nem = month; // For October, NEM = Oct month
+  const nem = month;
 
-  // Rain since 8:30 AM:
+  const totalIn = ld.totalrainin || 0;
   const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
-  // If lastRain was before 8:30 AM window start, no rain fell since 8:30 AM
-  let todayMm = 0;
-  if (lr >= ws) {
-    const post830In = Math.max(0, (ld.dailyrainin || 0) - 0.201);
-    todayMm = +(post830In * 25.4).toFixed(1);
+
+  // Retrieve baseline for the current 8:30 AM window from Redis
+  let baseline = null;
+  let prevDay = 0;
+  try {
+    const raw = await L.redis([
+      ['HGET', 'ambient:baseline', String(ws)],
+      ['HGET', 'rain:AMBIENT', 'prevDay']
+    ]);
+    if (raw && raw[0] != null) baseline = parseFloat(raw[0]);
+    if (raw && raw[1] != null) prevDay = parseFloat(raw[1]);
+  } catch (e) {}
+
+  if (baseline == null || isNaN(baseline)) {
+    if (lr < ws) {
+      // No rain has fallen since 8:30 AM, baseline is current odometer reading
+      baseline = totalIn;
+    } else {
+      // Rain has fallen since 8:30 AM; estimate baseline
+      baseline = Math.max(0, totalIn - (ld.dailyrainin || 0));
+    }
+    try {
+      await L.redis([['HSET', 'ambient:baseline', String(ws), baseline.toFixed(4)]]);
+    } catch (e) {}
   }
 
-  const prevDay = 7.9; // Ambient recorded 7.9 mm for Oct 20-21 rain day ending 8:30 AM
+  // Rain since 8:30 AM today:
+  const todayMm = +(Math.max(0, (totalIn - baseline) * 25.4)).toFixed(1);
 
+  if (!prevDay) prevDay = 7.9; // Known baseline for Oct 20-21 rain day
+
+  // Auto-record previous day's rain when window rolls over:
+  const prevWs = ws - 86400;
+  try {
+    const prevBaseRaw = (await L.redis([['HGET', 'ambient:baseline', String(prevWs)]]))[0];
+    if (prevBaseRaw != null) {
+      const pBase = parseFloat(prevBaseRaw);
+      const computedPrevDay = +(Math.max(0, (baseline - pBase) * 25.4)).toFixed(1);
+      if (computedPrevDay > 0) {
+        prevDay = computedPrevDay;
+        await L.redis([
+          ['HSET', 'rain:AMBIENT', 'prevDay', prevDay.toFixed(1)],
+          ['HSET', 'rain:AMBIENT', L.istDate(ws), prevDay.toFixed(1)]
+        ]);
+      }
+    }
+  } catch (e) {}
+
+  // 48-slot series since 8:30 AM
   const series = new Array(48).fill(0);
   if (todayMm > 0 && lr >= ws) {
     for (let i = 0; i < 48; i++) {
@@ -49,9 +90,10 @@ async function ambient(s, now, ws) {
 }
 
 async function wuStation(s, now, ws, todayCalDate) {
-  const [o5, curRes] = await Promise.all([
+  const [o5, curRes, sumRes] = await Promise.all([
     L.wu('observations/all/1day', s.id).catch(() => []),
-    L.wu('observations/current', s.id).catch(() => [])
+    L.wu('observations/current', s.id).catch(() => []),
+    L.wu('dailysummary/7day', s.id).catch(() => [])
   ]);
 
   const cur = curRes[0];
@@ -71,12 +113,21 @@ async function wuStation(s, now, ws, todayCalDate) {
   // Calendar day (since midnight local time):
   const calMm = +(cur?.metric?.precipTotal ?? 0).toFixed(1);
 
-  // Authoritative historical data (up to 2026-10-20) + today's live calendar rain
+  // Base historical totals up to 2026-10-20:
   const hist = HISTORICAL[s.id] || { octoberTotal: 0, yearTotal: 0, daysWithRain: {} };
 
-  // Read any completed days in Redis beyond Oct 20
-  let redisOct = 0;
-  let redisYear = 0;
+  // Collect all completed days beyond Oct 20 that are finished (< todayCalDate):
+  // 1. From WU's official dailysummary/7day endpoint
+  const completedDaysMap = {};
+  for (const sum of sumRes) {
+    const dStr = sum.obsTimeLocal?.slice(0, 10);
+    const p = sum.metric?.precipTotal || 0;
+    if (dStr > '2026-10-20' && dStr < todayCalDate) {
+      completedDaysMap[dStr] = p;
+    }
+  }
+
+  // 2. Also check Redis for any completed days
   try {
     const raw = (await L.redis([['HGETALL', 'rain:' + s.id]]))[0] || {};
     const h = {};
@@ -87,15 +138,31 @@ async function wuStation(s, now, ws, todayCalDate) {
     }
     for (const [k, v] of Object.entries(h)) {
       if (k > '2026-10-20' && k < todayCalDate) {
-        redisYear += v;
-        if (k.startsWith('2026-10')) redisOct += v;
+        if (completedDaysMap[k] == null) completedDaysMap[k] = v;
       }
     }
   } catch (e) {}
 
-  const liveCalRain = calMm;
-  const month = +(hist.octoberTotal + redisOct + liveCalRain).toFixed(1);
-  const year = +(hist.yearTotal + redisYear + liveCalRain).toFixed(1);
+  // Automatically save any new completed days into Redis for permanent storage:
+  try {
+    const redisSaves = [];
+    for (const [k, v] of Object.entries(completedDaysMap)) {
+      redisSaves.push(['HSET', 'rain:' + s.id, k, v.toFixed(2)]);
+    }
+    if (redisSaves.length) await L.redis(redisSaves);
+  } catch (e) {}
+
+  // Sum completed days beyond Oct 20:
+  let extraOct = 0;
+  let extraYear = 0;
+  for (const [dayStr, val] of Object.entries(completedDaysMap)) {
+    extraYear += val;
+    if (dayStr.startsWith('2026-10')) extraOct += val;
+  }
+
+  // Current day's live calendar rain is added to month and year
+  const month = +(hist.octoberTotal + extraOct + calMm).toFixed(1);
+  const year = +(hist.yearTotal + extraYear + calMm).toFixed(1);
   const nem = month; // NEM starts Oct 1
 
   // 48-slot 30-min cumulative series for chart since 8:30 AM
