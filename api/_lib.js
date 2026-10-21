@@ -45,7 +45,8 @@ const wu = async (path, id, extra = '', retry = true) => {
   if (r.status === 204) return [];
   if ((r.status === 401 || r.status === 403) && retry) { await getKey(true); return wu(path, id, extra, false); }
   if (!r.ok) throw new Error(`${id} ${path} HTTP ${r.status}`);
-  return (await r.json()).observations || [];
+  const j = await r.json();
+  return j.observations || j.summaries || [];
 };
 const toPts = o => o.filter(x => x.metric && x.metric.precipTotal != null).map(x => ({ t: x.epoch, v: x.metric.precipTotal })).sort((a, b) => a.t - b.t);
 // cumulative-since-midnight readings -> rainfall increments (handles midnight reset)
