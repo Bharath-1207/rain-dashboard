@@ -18,6 +18,20 @@ module.exports = async (req, res) => {
     return res.json({ deletedAll: true });
   }
 
+  if (action === 'load') {
+    const hist = require('./historical-2026.json');
+    const logs = {};
+    for (const [st, info] of Object.entries(hist)) {
+      const cmds = [['DEL', 'rain:' + st]];
+      for (const [day, val] of Object.entries(info.daysWithRain)) {
+        if (val > 0) cmds.push(['HSET', 'rain:' + st, day, val.toFixed(2)]);
+      }
+      await L.redis(cmds);
+      logs[st] = { loadedDays: cmds.length - 1, totalRain: info.yearTotal };
+    }
+    return res.json({ loaded: logs });
+  }
+
   const results = {};
   for (const s of L.STATIONS) {
     try {

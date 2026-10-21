@@ -13,12 +13,15 @@ h1{font-size:22px;margin:0}.sub{color:var(--mut);font-size:13px}
 .tabs button.on{color:var(--tx);border-color:var(--hd)}button:focus-visible{outline:2px solid var(--hd)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
-.card h2{font-size:15px;color:var(--hd);margin:0 0 2px;font-weight:700}.id{font-size:12px;color:var(--mut)}
-.top{display:flex;justify-content:space-between;align-items:flex-end;margin:14px 0}
-.big{font-size:52px;font-weight:600;line-height:1}.u{font-size:15px;color:var(--mut);margin-left:4px}
-.rr{text-align:right}.rr b{font-size:26px;color:var(--rr)}.rr.wet b{color:#4fd1ff}
+.card h2{font-size:16px;color:var(--hd);margin:0 0 2px;font-weight:700}.id{font-size:12px;color:var(--mut)}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start}
+.top{margin:10px 0 6px}
+.big{font-size:48px;font-weight:600;line-height:1}.u{font-size:15px;color:var(--mut);margin-left:4px}
+.rr{text-align:right}.rr b{font-size:22px;color:var(--rr)}.rr.wet b{color:#4fd1ff}
+.sub-row{display:flex;justify-content:space-between;background:#0c111c;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:10px 0 12px;font-size:11px;color:var(--mut)}
+.sub-row b{color:var(--tx);font-size:12px;margin-left:4px}
 .row{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);padding-top:12px}
-.row div{text-align:center}.row small{display:block;color:var(--mut);font-size:12px}.row b{font-size:16px}
+.row div{text-align:center}.row small{display:block;color:var(--mut);font-size:11px}.row b{font-size:15px}
 .stale{color:#e0a458;font-size:12px}.err{color:#ff7a7a;font-size:13px}
 #chartbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;height:min(70vh,520px)}
 .hide{display:none}
@@ -37,12 +40,31 @@ const $=id=>document.getElementById(id);let chart,data,loading=false;
 const pal=['#6b9cff','#4fd1ff','#a35cf0','#ff8a5c','#5ce0a0','#ffd25c','#ff5c8a','#c0c8dc'];
 const fmt=t=>new Date(t*1000).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});
 function render(){
-  $('meta').innerHTML=`<span class="live-dot"></span>Rain day <b>${data.todayKey}</b> (8:30 am to 8:30 am IST) · updated <b>${fmt(data.updated)} IST</b> <span class="sub" style="font-size:11px">· live auto-update 30s</span>`;
+  const startD = data.rainDayStartDate || data.todayKey;
+  $('meta').innerHTML=`<span class="live-dot"></span>Rain Day: <b>${startD}</b> (8:30 am IST → next day 8:30 am IST) · updated <b>${fmt(data.updated)} IST</b> <span class="sub" style="font-size:11px">· live auto-update 30s</span>`;
   $('grid').innerHTML=data.stations.map(s=>s.error?`<div class="card"><h2>${s.name}</h2><div class="err">Could not load: ${s.error}</div></div>`:
-  `<div class="card"><h2>${s.name}</h2><div class="id">${s.id}${s.ageMin>45?` · <span class="stale">last report ${s.ageMin} min ago</span>`:s.ageMin<=2?` · <span style="color:#5ce0a0">just reported</span>`:''}</div>
-  <div class="top"><div><span class="big">${s.today}</span><span class="u">mm</span></div>
-  <div class="rr ${s.rate>0?'wet':''}"><small class="sub">Rain rate</small><br><b>${s.rate}</b><span class="u">mm/h</span></div></div>
-  <div class="row"><div><small>Monthly</small><b>${s.month} mm</b></div><div><small>NEM</small><b>${s.nem} mm</b></div><div><small>Yearly</small><b>${s.year} mm</b></div></div></div>`).join('');
+  `<div class="card">
+    <div class="card-head">
+      <div>
+        <h2>${s.name}</h2>
+        <div class="id">${s.id}${s.ageMin>45?` · <span class="stale">last report ${s.ageMin} min ago</span>`:s.ageMin<=2?` · <span style="color:#5ce0a0">live</span>`:''}</div>
+      </div>
+      <div class="rr ${s.rate>0?'wet':''}"><small class="sub">Rain rate</small><br><b>${s.rate}</b><span class="u">mm/h</span></div>
+    </div>
+    <div class="top">
+      <div><span class="big">${s.today}</span><span class="u">mm</span></div>
+      <div class="sub" style="font-size:11px;color:var(--hd);font-weight:600">Since 8:30 am today</div>
+    </div>
+    <div class="sub-row">
+      <div><span>Yesterday (ended 8:30am):</span> <b>${s.prevDay != null ? s.prevDay : '-'} mm</b></div>
+      <div><span>Calendar day:</span> <b>${s.calDay != null ? s.calDay : '-'} mm</b></div>
+    </div>
+    <div class="row">
+      <div><small>Monthly (Oct)</small><b>${s.month} mm</b></div>
+      <div><small>NEM (from Oct 1)</small><b>${s.nem} mm</b></div>
+      <div><small>Yearly (2026)</small><b>${s.year} mm</b></div>
+    </div>
+  </div>`).join('');
   const labels=Array.from({length:48},(_,i)=>{const m=510+30*(i+1);return String(Math.floor(m/60)%24).padStart(2,'0')+':'+String(m%60).padStart(2,'0')});
   const ds=data.stations.filter(s=>!s.error).map((s,i)=>({label:s.name,data:s.series,borderColor:pal[i%8],backgroundColor:pal[i%8],tension:.25,pointRadius:0,borderWidth:2}));
   if(chart)chart.destroy();
