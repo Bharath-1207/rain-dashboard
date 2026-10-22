@@ -1,15 +1,16 @@
 const L = require('./_lib');
 const HISTORICAL = require('./historical-2026.json');
 
-// Historical baseline at 8:30 AM on Oct 21 for accurate yesterday calculations:
-const PRE830_OCT21 = {
-  'IPONDI5': 3.61,
-  'IPONDI9': 3.81,
-  'IPONDI10': 7.29,
-  'IAUROV6': 4.80,
-  'IAUROV10': 6.81,
-  'IAUROV11': 9.09,
-  'IVANUR5': 7.87
+// Exact 24h rainfall for the rain day that ended at 8:30 AM on Oct 22, 2026:
+const PREV_OCT22 = {
+  'IPONDI9': 68.1,
+  'IPONDI5': 35.0,
+  'IPONDI10': 3.8,
+  'IAUROV6': 12.2,
+  'IAUROV10': 15.8,
+  'IAUROV11': 15.5,
+  'IVANUR5': 35.8,
+  'AMBIENT': 30.7
 };
 
 async function ambient(s, now, ws) {
@@ -26,14 +27,14 @@ async function ambient(s, now, ws) {
   const ld = dev?.lastData || {};
   const hl = ld.hl || {};
 
-  // Ambient values can be at root of lastData OR inside hl (when not actively raining):
+  // Ambient values can be at root of lastData OR inside hl (when station is not actively receiving rain):
   const monthlyIn = ld.monthlyrainin ?? hl.monthlyrainin?.h ?? null;
   const yearlyIn = ld.yearlyrainin ?? hl.yearlyrainin?.h ?? null;
   const dailyIn = ld.dailyrainin ?? hl.dailyrainin?.h ?? null;
   const totalIn = ld.totalrainin ?? hl.totalrainin?.h ?? null;
   const hourlyIn = ld.hourlyrainin ?? hl.hourlyrainin?.h ?? null;
 
-  // Retrieve last valid readings from Redis as fallback so it NEVER drops to 0:
+  // Retrieve last valid readings from Redis as persistent backup:
   let lastValid = {};
   try {
     const raw = (await L.redis([['HGETALL', 'ambient:last_valid']]))[0] || {};
@@ -44,16 +45,16 @@ async function ambient(s, now, ws) {
     }
   } catch (e) {}
 
-  // Safe monthly and yearly:
-  // Baseline floor for October is 144.8 mm; floor for 2026 is 556.0 mm.
+  // Safe monthly, yearly, and totalrainin with permanent floor protections:
+  // Base October floor is 175.5 mm; Year floor is 586.7 mm. It can NEVER drop to 0!
   const month = +(Math.max(
-    144.8,
+    175.5,
     lastValid.month || 0,
     monthlyIn != null ? monthlyIn * 25.4 : 0
   )).toFixed(1);
 
   const year = +(Math.max(
-    556.0,
+    586.7,
     lastValid.year || 0,
     yearlyIn != null ? yearlyIn * 25.4 : 0
   )).toFixed(1);
@@ -76,14 +77,9 @@ async function ambient(s, now, ws) {
 
   // Baseline at 8:30 AM window start:
   let baseline = null;
-  let prevDay = 0;
   try {
-    const raw = await L.redis([
-      ['HGET', 'ambient:baseline', String(ws)],
-      ['HGET', 'rain:AMBIENT', 'prevDay']
-    ]);
-    if (raw && raw[0] != null) baseline = parseFloat(raw[0]);
-    if (raw && raw[1] != null) prevDay = parseFloat(raw[1]);
+    const raw = (await L.redis([['HGET', 'ambient:baseline', String(ws)]]))[0];
+    if (raw != null) baseline = parseFloat(raw);
   } catch (e) {}
 
   const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
@@ -98,12 +94,19 @@ async function ambient(s, now, ws) {
     } catch (e) {}
   }
 
-  // Real-time rain since 8:30 AM:
+  // Real-time rain since 8:30 AM today using lifetime odometer:
   const todayMm = +(Math.max(0, (currentTotalIn - baseline) * 25.4)).toFixed(1);
 
   // Yesterday 24h rain ended at 8:30 AM:
-  // For Oct 22, it was 30.7 mm
-  if (!prevDay || prevDay < 30.7) prevDay = 30.7;
+  let prevDay = PREV_OCT22['AMBIENT'] || 30.7;
+  try {
+    const prevBaseRaw = (await L.redis([['HGET', 'ambient:baseline', String(ws - 86400)]]))[0];
+    if (prevBaseRaw != null) {
+      const pBase = parseFloat(prevBaseRaw);
+      const computedPrevDay = +(Math.max(0, (baseline - pBase) * 25.4)).toFixed(1);
+      if (computedPrevDay > 0) prevDay = computedPrevDay;
+    }
+  } catch (e) {}
 
   const lastEpoch = ld.dateutc ? Math.floor(ld.dateutc / 1000) : now;
   const ageMin = Math.round((now - lastEpoch) / 60);
@@ -157,7 +160,6 @@ async function wuStation(s, now, ws, todayCalDate) {
   } catch (e) {}
 
   if (p830 == null || isNaN(p830)) {
-    // Determine p830 from observations closest to 8:30 AM
     const ptsBefore830 = pts.filter(p => p.t <= ws);
     p830 = ptsBefore830.length ? ptsBefore830[ptsBefore830.length - 1].v : calMm;
     try {
@@ -167,27 +169,33 @@ async function wuStation(s, now, ws, todayCalDate) {
 
   // Real-time todayMm from cur.metric.precipTotal:
   let todayMm = 0;
-  if (now >= ws) {
+  const isSameCalendarDay = (L.istDate(now) === L.istDate(ws));
+  if (isSameCalendarDay) {
     todayMm = +(Math.max(0, calMm - p830)).toFixed(1);
   } else {
-    // If before 8:30 AM (past midnight):
-    const ptsAfterMidnight = pts.filter(p => p.t >= Math.floor((now + 19800) / 86400) * 86400 - 19800);
-    todayMm = calMm; // since midnight
+    // Past midnight before 8:30 AM tomorrow:
+    const prevDate = L.istDate(ws);
+    const prevDaySum = sumRes.find(x => x.obsTimeLocal?.startsWith(prevDate))?.metric?.precipTotal || 0;
+    const rainPost830 = Math.max(0, prevDaySum - p830);
+    todayMm = +(rainPost830 + calMm).toFixed(1);
   }
 
   // 2. YESTERDAY (ended 8:30 AM) - COMPLETE 24H RAIN DAY:
-  // Rain on previous calendar day after 8:30 AM + Rain on today before 8:30 AM
-  let prevDay = 0;
+  let prevDay = PREV_OCT22[s.id] || 0;
   try {
     const rawPrev = (await L.redis([['HGET', 'wu:prevDay:' + s.id, String(ws)]]))[0];
     if (rawPrev != null) prevDay = parseFloat(rawPrev);
   } catch (e) {}
 
   if (!prevDay) {
-    const prevDate = L.istDate(ws - 86400); // e.g. 2026-10-21
+    const prevDate = L.istDate(ws - 86400);
     const prevDaySum = sumRes.find(x => x.obsTimeLocal?.startsWith(prevDate))?.metric?.precipTotal || 0;
-    const prevDayPre830 = (prevDate === '2026-10-21') ? (PRE830_OCT21[s.id] || 0) : 0;
-    const prevDayPost830 = Math.max(0, prevDaySum - prevDayPre830);
+    let prevBase830 = 0;
+    try {
+      const bRaw = (await L.redis([['HGET', 'wu:baseline:' + s.id, String(ws - 86400)]]))[0];
+      if (bRaw != null) prevBase830 = parseFloat(bRaw);
+    } catch (e) {}
+    const prevDayPost830 = Math.max(0, prevDaySum - prevBase830);
     const todayPre830 = p830;
     prevDay = +(prevDayPost830 + todayPre830).toFixed(1);
     try {
@@ -198,12 +206,12 @@ async function wuStation(s, now, ws, todayCalDate) {
   // 3. MONTHLY, NEM, AND YEARLY TOTALS:
   const hist = HISTORICAL[s.id] || { octoberTotal: 0, yearTotal: 0, daysWithRain: {} };
 
-  // Collect all completed days beyond Oct 20 that are finished (< todayCalDate):
+  // Collect all completed days beyond Oct 21 from dailysummary/7day:
   const completedDaysMap = {};
   for (const sum of sumRes) {
     const dStr = sum.obsTimeLocal?.slice(0, 10);
     const p = sum.metric?.precipTotal || 0;
-    if (dStr > '2026-10-20' && dStr < todayCalDate) {
+    if (dStr > '2026-10-21' && dStr < todayCalDate) {
       completedDaysMap[dStr] = p;
     }
   }
@@ -218,7 +226,7 @@ async function wuStation(s, now, ws, todayCalDate) {
       for (const [k, v] of Object.entries(raw)) h[k] = +v;
     }
     for (const [k, v] of Object.entries(h)) {
-      if (k > '2026-10-20' && k < todayCalDate) {
+      if (k > '2026-10-21' && k < todayCalDate) {
         if (completedDaysMap[k] == null) completedDaysMap[k] = v;
       }
     }
@@ -233,7 +241,7 @@ async function wuStation(s, now, ws, todayCalDate) {
     if (redisSaves.length) await L.redis(redisSaves);
   } catch (e) {}
 
-  // Sum completed days beyond Oct 20:
+  // Sum completed days beyond Oct 21:
   let extraOct = 0;
   let extraYear = 0;
   for (const [dayStr, val] of Object.entries(completedDaysMap)) {
