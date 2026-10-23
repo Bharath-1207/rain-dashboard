@@ -1,19 +1,57 @@
 const L = require('./_lib');
 const HISTORICAL = require('./historical-2026.json');
 
-// Exact 24h rainfall for the rain day that ended at 8:30 AM on Oct 22, 2026:
-const PREV_OCT22 = {
-  'IPONDI9': 68.1,
-  'IPONDI5': 35.0,
-  'IPONDI10': 3.8,
-  'IAUROV6': 12.2,
-  'IAUROV10': 15.8,
-  'IAUROV11': 15.5,
-  'IVANUR5': 35.8,
-  'AMBIENT': 30.7
+// Known verified benchmarks for past rain days ending at 8:30 AM IST (keyed by window end date):
+const KNOWN_PREV = {
+  // Rain day Oct 21 8:30am -> Oct 22 8:30am:
+  '2026-10-22': {
+    'IPONDI9': 68.1,
+    'IPONDI5': 35.0,
+    'IPONDI10': 3.8,
+    'IAUROV6': 12.2,
+    'IAUROV10': 15.8,
+    'IAUROV11': 15.5,
+    'IVANUR5': 35.8,
+    'AMBIENT': 30.7
+  },
+  // Rain day Oct 22 8:30am -> Oct 23 8:30am:
+  '2026-10-23': {
+    'IPONDI9': 100.3,
+    'IPONDI5': 25.2,
+    'IPONDI10': 0.0,
+    'IAUROV6': 94.8,
+    'IAUROV10': 42.0,
+    'IAUROV11': 38.1,
+    'IVANUR5': 23.9,
+    'AMBIENT': 34.8
+  }
 };
 
-async function ambient(s, now, ws) {
+// Known baselines at 8:30 AM IST on specific calendar days (authoritative fallback):
+const KNOWN_BASELINES = {
+  '2026-10-22': {
+    'IPONDI9': 10.20,
+    'IPONDI5': 4.80,
+    'IPONDI10': 3.51,
+    'IAUROV6': 4.29,
+    'IAUROV10': 5.00,
+    'IAUROV11': 5.31,
+    'IVANUR5': 8.64,
+    'AMBIENT': 50.87
+  },
+  '2026-10-23': {
+    'IPONDI9': 100.10,
+    'IPONDI5': 25.20,
+    'IPONDI10': 0.00,
+    'IAUROV6': 94.79,
+    'IAUROV10': 42.01,
+    'IAUROV11': 38.10,
+    'IVANUR5': 23.88,
+    'AMBIENT': 52.24
+  }
+};
+
+async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
   const base = 'https://lightning.ambientweather.net/';
   let dev = null;
   try {
@@ -39,30 +77,41 @@ async function ambient(s, now, ws) {
   try {
     const raw = (await L.redis([['HGETALL', 'ambient:last_valid']]))[0] || {};
     if (Array.isArray(raw)) {
-      for (let i = 0; i < raw.length; i += 2) lastValid[raw[i]] = +raw[i + 1];
+      for (let i = 0; i < raw.length; i += 2) lastValid[raw[i]] = raw[i + 1];
     } else {
-      for (const [k, v] of Object.entries(raw)) lastValid[k] = +v;
+      for (const [k, v] of Object.entries(raw)) lastValid[k] = v;
     }
   } catch (e) {}
 
   // Safe monthly, yearly, and totalrainin with permanent floor protections:
-  // Base October floor is 175.5 mm; Year floor is 586.7 mm. It can NEVER drop to 0!
+  // Base October floor is 210.3 mm; Year floor is 621.5 mm. It can NEVER drop to 0!
   const month = +(Math.max(
-    175.5,
-    lastValid.month || 0,
+    210.3,
+    lastValid.month ? parseFloat(lastValid.month) : 0,
     monthlyIn != null ? monthlyIn * 25.4 : 0
   )).toFixed(1);
 
   const year = +(Math.max(
-    586.7,
-    lastValid.year || 0,
+    621.5,
+    lastValid.year ? parseFloat(lastValid.year) : 0,
     yearlyIn != null ? yearlyIn * 25.4 : 0
   )).toFixed(1);
 
   const nem = month;
   const rate = +((hourlyIn || 0) * 25.4).toFixed(1);
-  const calDay = +((dailyIn != null ? dailyIn : (lastValid.calDay != null ? lastValid.calDay : 0)) * 25.4).toFixed(1);
-  const currentTotalIn = totalIn != null ? totalIn : (lastValid.totalIn != null ? lastValid.totalIn : 50.87);
+
+  // Calendar day: preserve across temporary outages, but respect day change:
+  const isSameCalDayAsLastValid = lastValid.calDayDate === todayCalDate;
+  const calDay = +(
+    (dailyIn != null
+      ? dailyIn
+      : (isSameCalDayAsLastValid && lastValid.calDay != null ? parseFloat(lastValid.calDay) : 0)
+    ) * 25.4
+  ).toFixed(1);
+
+  const currentTotalIn = totalIn != null
+    ? totalIn
+    : (lastValid.totalIn != null ? parseFloat(lastValid.totalIn) : 52.24);
 
   // Update last valid in Redis:
   try {
@@ -70,7 +119,8 @@ async function ambient(s, now, ws) {
       'HSET', 'ambient:last_valid',
       'month', month.toFixed(1),
       'year', year.toFixed(1),
-      'calDay', (dailyIn != null ? dailyIn : (lastValid.calDay || 0)).toFixed(4),
+      'calDay', (dailyIn != null ? dailyIn : (isSameCalDayAsLastValid && lastValid.calDay ? parseFloat(lastValid.calDay) : 0)).toFixed(4),
+      'calDayDate', todayCalDate,
       'totalIn', currentTotalIn.toFixed(4)
     ]]);
   } catch (e) {}
@@ -79,15 +129,20 @@ async function ambient(s, now, ws) {
   let baseline = null;
   try {
     const raw = (await L.redis([['HGET', 'ambient:baseline', String(ws)]]))[0];
-    if (raw != null) baseline = parseFloat(raw);
+    if (raw != null && !isNaN(parseFloat(raw))) baseline = parseFloat(raw);
   } catch (e) {}
 
-  const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
   if (baseline == null || isNaN(baseline)) {
-    if (lr < ws) {
-      baseline = currentTotalIn;
+    const knownBase = KNOWN_BASELINES[rainDayStartDate]?.['AMBIENT'];
+    if (knownBase != null) {
+      baseline = knownBase;
     } else {
-      baseline = Math.max(0, currentTotalIn - (dailyIn != null ? dailyIn : 0));
+      const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
+      if (lr < ws) {
+        baseline = currentTotalIn;
+      } else {
+        baseline = Math.max(0, currentTotalIn - (dailyIn != null ? dailyIn : 0));
+      }
     }
     try {
       await L.redis([['HSET', 'ambient:baseline', String(ws), baseline.toFixed(4)]]);
@@ -98,20 +153,43 @@ async function ambient(s, now, ws) {
   const todayMm = +(Math.max(0, (currentTotalIn - baseline) * 25.4)).toFixed(1);
 
   // Yesterday 24h rain ended at 8:30 AM:
-  let prevDay = PREV_OCT22['AMBIENT'] || 30.7;
+  let prevDay = null;
   try {
-    const prevBaseRaw = (await L.redis([['HGET', 'ambient:baseline', String(ws - 86400)]]))[0];
-    if (prevBaseRaw != null) {
-      const pBase = parseFloat(prevBaseRaw);
-      const computedPrevDay = +(Math.max(0, (baseline - pBase) * 25.4)).toFixed(1);
-      if (computedPrevDay > 0) prevDay = computedPrevDay;
+    const rawPrev = (await L.redis([['HGET', 'ambient:prevDay', String(ws)]]))[0];
+    if (rawPrev != null && !isNaN(parseFloat(rawPrev))) prevDay = parseFloat(rawPrev);
+  } catch (e) {}
+
+  if (prevDay == null) {
+    let pBase = null;
+    try {
+      const prevBaseRaw = (await L.redis([['HGET', 'ambient:baseline', String(ws - 86400)]]))[0];
+      if (prevBaseRaw != null && !isNaN(parseFloat(prevBaseRaw))) pBase = parseFloat(prevBaseRaw);
+    } catch (e) {}
+
+    if (pBase == null) {
+      const prevDate = L.istDate(ws - 86400);
+      pBase = KNOWN_BASELINES[prevDate]?.['AMBIENT'] ?? null;
     }
+
+    if (pBase != null && baseline != null) {
+      prevDay = +(Math.max(0, (baseline - pBase) * 25.4)).toFixed(1);
+    }
+  }
+
+  // If still null, check known benchmark for this window end date:
+  if (prevDay == null) {
+    prevDay = KNOWN_PREV[rainDayStartDate]?.['AMBIENT'] ?? 0;
+  }
+
+  try {
+    await L.redis([['HSET', 'ambient:prevDay', String(ws), prevDay.toFixed(1)]]);
   } catch (e) {}
 
   const lastEpoch = ld.dateutc ? Math.floor(ld.dateutc / 1000) : now;
-  const ageMin = Math.round((now - lastEpoch) / 60);
+  const ageMin = Math.max(0, Math.round((now - lastEpoch) / 60));
 
   const series = new Array(48).fill(0);
+  const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
   if (todayMm > 0 && lr >= ws) {
     for (let i = 0; i < 48; i++) {
       const t = ws + (i + 1) * 1800;
@@ -134,7 +212,7 @@ async function ambient(s, now, ws) {
   };
 }
 
-async function wuStation(s, now, ws, todayCalDate) {
+async function wuStation(s, now, ws, todayCalDate, rainDayStartDate) {
   // Fetch observations/current (updated every 1-2 mins), dailysummary/7day, and rolling 1day obs:
   const [curRes, sumRes, o5] = await Promise.all([
     L.wu('observations/current', s.id).catch(() => []),
@@ -146,22 +224,26 @@ async function wuStation(s, now, ws, todayCalDate) {
   const pts = L.toPts(o5);
 
   const lastEpoch = cur?.epoch ?? (pts.length ? pts[pts.length - 1].t : 0);
-  const ageMin = lastEpoch ? Math.round((now - lastEpoch) / 60) : 999;
+  const ageMin = lastEpoch ? Math.max(0, Math.round((now - lastEpoch) / 60)) : 999;
   const rate = +(cur?.metric?.precipRate ?? (o5.length ? o5[o5.length - 1]?.metric?.precipRate : 0) ?? 0).toFixed(1);
 
   // Calendar day (since midnight local time):
   const calMm = +(cur?.metric?.precipTotal ?? 0).toFixed(1);
 
-  // 1. REAL-TIME ACCUMULATION SINCE 8:30 AM (updates every 1-2 mins via observations/current):
+  // 1. BASELINE AT 8:30 AM FOR CURRENT RAIN DAY (updates every 1-2 mins via observations/current):
   let p830 = null;
   try {
     const rawP = (await L.redis([['HGET', 'wu:baseline:' + s.id, String(ws)]]))[0];
-    if (rawP != null) p830 = parseFloat(rawP);
+    if (rawP != null && !isNaN(parseFloat(rawP))) p830 = parseFloat(rawP);
   } catch (e) {}
 
-  if (p830 == null || isNaN(p830)) {
+  if (p830 == null) {
     const ptsBefore830 = pts.filter(p => p.t <= ws);
-    p830 = ptsBefore830.length ? ptsBefore830[ptsBefore830.length - 1].v : calMm;
+    if (ptsBefore830.length) {
+      p830 = ptsBefore830[ptsBefore830.length - 1].v;
+    } else {
+      p830 = KNOWN_BASELINES[rainDayStartDate]?.[s.id] ?? calMm;
+    }
     try {
       await L.redis([['HSET', 'wu:baseline:' + s.id, String(ws), p830.toFixed(2)]]);
     } catch (e) {}
@@ -181,26 +263,37 @@ async function wuStation(s, now, ws, todayCalDate) {
   }
 
   // 2. YESTERDAY (ended 8:30 AM) - COMPLETE 24H RAIN DAY:
-  let prevDay = PREV_OCT22[s.id] || 0;
+  let prevDay = null;
   try {
     const rawPrev = (await L.redis([['HGET', 'wu:prevDay:' + s.id, String(ws)]]))[0];
-    if (rawPrev != null) prevDay = parseFloat(rawPrev);
+    if (rawPrev != null && !isNaN(parseFloat(rawPrev))) prevDay = parseFloat(rawPrev);
   } catch (e) {}
 
-  if (!prevDay) {
+  if (prevDay == null) {
     const prevDate = L.istDate(ws - 86400);
     const prevDaySum = sumRes.find(x => x.obsTimeLocal?.startsWith(prevDate))?.metric?.precipTotal || 0;
-    let prevBase830 = 0;
+    let prevBase830 = null;
     try {
       const bRaw = (await L.redis([['HGET', 'wu:baseline:' + s.id, String(ws - 86400)]]))[0];
-      if (bRaw != null) prevBase830 = parseFloat(bRaw);
+      if (bRaw != null && !isNaN(parseFloat(bRaw))) prevBase830 = parseFloat(bRaw);
     } catch (e) {}
+
+    if (prevBase830 == null) {
+      prevBase830 = KNOWN_BASELINES[prevDate]?.[s.id] ?? 0;
+    }
+
     const prevDayPost830 = Math.max(0, prevDaySum - prevBase830);
     const todayPre830 = p830;
     prevDay = +(prevDayPost830 + todayPre830).toFixed(1);
+
     try {
       await L.redis([['HSET', 'wu:prevDay:' + s.id, String(ws), prevDay.toFixed(1)]]);
     } catch (e) {}
+  }
+
+  // If calculation resulted in 0 or null and we have a verified known benchmark for this end date:
+  if ((prevDay == null || prevDay === 0) && KNOWN_PREV[rainDayStartDate]?.[s.id] != null) {
+    prevDay = KNOWN_PREV[rainDayStartDate][s.id];
   }
 
   // 3. MONTHLY, NEM, AND YEARLY TOTALS:
@@ -290,7 +383,9 @@ module.exports = async (req, res) => {
 
   const out = await Promise.all(
     L.STATIONS.map(s => {
-      const p = s.amb ? ambient(s, now, ws) : wuStation(s, now, ws, todayCalDate);
+      const p = s.amb
+        ? ambient(s, now, ws, todayCalDate, rainDayStartDate)
+        : wuStation(s, now, ws, todayCalDate, rainDayStartDate);
       return p.catch(e => ({ id: s.id, name: s.name, error: e.message }));
     })
   );
