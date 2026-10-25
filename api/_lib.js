@@ -1,6 +1,13 @@
-// Shared helpers for Pondy & Auroville Rain Dashboard
-const KNOWN_KEY = 'e1f10a1e78da46f5b10a1e78da96f525';
-let K = process.env.WU_API_KEY || KNOWN_KEY;
+const PRIMARY_KEY = 'f6d2efe5720d47ea92efe5720df7eaa8';
+const CANDIDATE_KEYS = [
+  'f6d2efe5720d47ea92efe5720df7eaa8',
+  'e1f10a1e78da46f5b10a1e78da96f525',
+  'ff90f212a6984a7390f212a698ea73cc'
+];
+let K = process.env.WU_API_KEY || PRIMARY_KEY;
+
+// In-memory cache for API endpoints to prevent throttling:
+const cache = new Map();
 
 const RU = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const RT = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
@@ -37,28 +44,93 @@ const redis = async cmds => {
   }
 };
 
+const scrapeActiveKey = async () => {
+  try {
+    const r = await fetch('https://www.wunderground.com/dashboard/pws/IPONDI9', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/"API_KEY":\s*"([a-f0-9]{32})"/i);
+    return m ? m[1] : null;
+  } catch (e) {
+    return null;
+  }
+};
+
 const getKey = async force => {
   if (K && !force) return K;
-  if (process.env.WU_API_KEY) return (K = process.env.WU_API_KEY);
-  for (const candidate of [KNOWN_KEY, 'ff90f212a6984a7390f212a698ea73cc']) {
+  if (process.env.WU_API_KEY && !force) return (K = process.env.WU_API_KEY);
+
+  // Check Redis for active key if forced:
+  if (force) {
     try {
-      const testRes = await fetch(`https://api.weather.com/v2/pws/observations/current?stationId=IPONDI5&format=json&units=m&numericPrecision=decimal&apiKey=${candidate}`);
-      if (testRes.status === 200) return (K = candidate);
+      const redisKey = (await redis([['GET', 'wu:active_key']]))[0];
+      if (redisKey && redisKey !== K) {
+        const testRes = await fetch(`https://api.weather.com/v2/pws/observations/current?stationId=IPONDI9&format=json&units=m&numericPrecision=decimal&apiKey=${redisKey}`);
+        if (testRes.status === 200 || testRes.status === 204) return (K = redisKey);
+      }
     } catch (e) {}
   }
-  return (K = KNOWN_KEY);
+
+  // Test candidate keys:
+  for (const candidate of CANDIDATE_KEYS) {
+    if (candidate === K && force) continue;
+    try {
+      const testRes = await fetch(`https://api.weather.com/v2/pws/observations/current?stationId=IPONDI9&format=json&units=m&numericPrecision=decimal&apiKey=${candidate}`);
+      if (testRes.status === 200 || testRes.status === 204) {
+        K = candidate;
+        try { await redis([['SET', 'wu:active_key', candidate]]); } catch (e) {}
+        return K;
+      }
+    } catch (e) {}
+  }
+
+  // Scrape fresh active key directly from wunderground.com:
+  const scraped = await scrapeActiveKey();
+  if (scraped) {
+    K = scraped;
+    try { await redis([['SET', 'wu:active_key', scraped]]); } catch (e) {}
+    return K;
+  }
+
+  return (K = PRIMARY_KEY);
 };
 
 const wu = async (path, id, extra = '', retry = true) => {
-  const r = await fetch(`https://api.weather.com/v2/pws/${path}?stationId=${id}&format=json&units=m&numericPrecision=decimal${extra}&apiKey=${await getKey()}`);
-  if (r.status === 204) return [];
+  const cacheKey = `${path}:${id}:${extra}`;
+  const now = Date.now();
+  const cached = cache.get(cacheKey);
+
+  // Cache 7day summary for 120s, 1day observations for 60s, current for 15s to prevent throttling:
+  const ttl = path.includes('dailysummary') ? 120000 : path.includes('all/1day') ? 60000 : 15000;
+  if (cached && (now - cached.time) < ttl) {
+    return cached.data;
+  }
+
+  const key = await getKey();
+  const r = await fetch(`https://api.weather.com/v2/pws/${path}?stationId=${id}&format=json&units=m&numericPrecision=decimal${extra}&apiKey=${key}`);
+
+  if (r.status === 204) {
+    const data = [];
+    cache.set(cacheKey, { time: now, data });
+    return data;
+  }
+
   if ((r.status === 401 || r.status === 403) && retry) {
     await getKey(true);
     return wu(path, id, extra, false);
   }
-  if (!r.ok) throw new Error(`${id} ${path} HTTP ${r.status}`);
+
+  if (!r.ok) {
+    if (cached) return cached.data;
+    throw new Error(`${id} ${path} HTTP ${r.status}`);
+  }
+
   const j = await r.json();
-  return j.observations || j.summaries || [];
+  const data = j.observations || j.summaries || [];
+  cache.set(cacheKey, { time: now, data });
+  return data;
 };
 
 const toPts = o => (o || [])
