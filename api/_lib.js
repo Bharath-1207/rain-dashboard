@@ -30,6 +30,17 @@ const winStart = t => Math.floor((t - 10800) / 86400) * 86400 + 10800;
 // istDate(t): IST calendar date (YYYY-MM-DD) for epoch t
 const istDate = t => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
 
+// rainDayMonth(ws): The IMD meteorological month (YYYY-MM) for rain day starting at ws.
+// Per IMD convention, 24h rainfall is assigned to the month of its END date (ws + 86400).
+// e.g. Oct 31 08:30 AM -> Nov 01 08:30 AM belongs to November ('2026-11').
+// Nov 30 08:30 AM -> Dec 01 08:30 AM belongs to December ('2026-12').
+const rainDayMonth = ws => istDate(ws + 86400).slice(0, 7);
+
+// Milestone epochs at 08:30 AM IST (03:00 UTC):
+const OCT31_830 = 1793415600; // 2026-10-31 08:30:00 IST
+const NOV30_830 = 1796007600; // 2026-11-30 08:30:00 IST
+const DEC31_830 = 1798686000; // 2026-12-31 08:30:00 IST
+
 const redis = async cmds => {
   if (!RU) return [];
   try {
@@ -150,4 +161,5 @@ const incs = p => {
   return o;
 };
 
-module.exports = { STATIONS, winStart, istDate, redis, wu, toPts, incs };
+module.exports = { STATIONS, winStart, istDate, rainDayMonth, OCT31_830, NOV30_830, DEC31_830, redis, wu, toPts, incs };
+

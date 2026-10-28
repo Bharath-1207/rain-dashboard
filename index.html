@@ -254,7 +254,8 @@ function drawExportCanvas(sorted, topStation, avgVal, rainDate){
 
 function render(){
   const startD = data.rainDayStartDate || data.todayKey;
-  const curM = (startD || '').slice(5, 7);
+  const activeMonthStr = data.rainDayMonth || (data.rainDayEndDate || '').slice(0, 7) || (startD || '').slice(0, 7);
+  const curM = activeMonthStr.slice(5, 7);
   const curMonthName = curM === '11' ? 'November' : (curM === '12' ? 'December' : 'October');
   $('meta').innerHTML=`<span class="live-dot"></span>Rain Day: <b>${startD}</b> (8:30 am IST → next day 8:30 am IST) · updated <b>${fmt(data.updated)} IST</b> <span class="sub" style="font-size:11px">· live auto-update 30s</span>`;
   

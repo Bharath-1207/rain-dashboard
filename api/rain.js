@@ -51,7 +51,7 @@ const KNOWN_BASELINES = {
   }
 };
 
-async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
+async function ambient(s, now, ws, todayCalDate, rainDayStartDate, rainDayEndDate, activeRainMonth) {
   const base = 'https://lightning.ambientweather.net/';
   let dev = null;
   try {
@@ -83,25 +83,88 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
     }
   } catch (e) {}
 
-  // Safe monthly, yearly, and totalrainin with permanent floor protections:
-  // Base October floor is 379.7 mm (verified Oct 2026 total); Year floor is 790.9 mm. It can NEVER drop to 0!
-  const oct = +(Math.max(
-    379.7,
-    lastValid.oct ? parseFloat(lastValid.oct) : (lastValid.month ? parseFloat(lastValid.month) : 0),
-    todayCalDate.startsWith('2026-10') && monthlyIn != null ? monthlyIn * 25.4 : 0
-  )).toFixed(1);
+  const currentTotalIn = totalIn != null
+    ? totalIn
+    : (lastValid.totalIn != null ? parseFloat(lastValid.totalIn) : 52.24);
 
-  const nov = +(Math.max(
-    0,
-    lastValid.nov ? parseFloat(lastValid.nov) : 0,
-    todayCalDate.startsWith('2026-11') && monthlyIn != null ? monthlyIn * 25.4 : 0
-  )).toFixed(1);
+  // IMD MONTHLY TALLIES PER 08:30 AM CUTOFFS:
+  // Oct 31 08:30 AM to Nov 01 08:30 AM belongs to November
+  // Nov 30 08:30 AM to Dec 01 08:30 AM belongs to December
+  let oct = 379.7;
+  let nov = 0.0;
+  let dec = 0.0;
 
-  const dec = +(Math.max(
-    0,
-    lastValid.dec ? parseFloat(lastValid.dec) : 0,
-    todayCalDate.startsWith('2026-12') && monthlyIn != null ? monthlyIn * 25.4 : 0
-  )).toFixed(1);
+  if (ws < L.OCT31_830) {
+    // Up to Oct 31 08:30 AM IST: October is actively accumulating (floor 379.7 mm)
+    oct = +(Math.max(
+      379.7,
+      lastValid.oct ? parseFloat(lastValid.oct) : (lastValid.month ? parseFloat(lastValid.month) : 0),
+      todayCalDate.startsWith('2026-10') && monthlyIn != null ? monthlyIn * 25.4 : 0
+    )).toFixed(1);
+    nov = 0.0;
+    dec = 0.0;
+  } else if (ws < L.NOV30_830) {
+    // Rain day Oct 31 08:30 AM to Nov 30 08:30 AM: November is accumulating
+    // October is closed and permanently frozen at final total (minimum 379.7 mm):
+    oct = +(Math.max(
+      379.7,
+      lastValid.oct_final ? parseFloat(lastValid.oct_final) : 0,
+      lastValid.oct ? parseFloat(lastValid.oct) : 0
+    )).toFixed(1);
+
+    let novStartOdo = null;
+    if (lastValid.nov_start_odo && !isNaN(parseFloat(lastValid.nov_start_odo))) {
+      novStartOdo = parseFloat(lastValid.nov_start_odo);
+    } else {
+      try {
+        const rawOdo = (await L.redis([['HGET', 'ambient:baseline', String(L.OCT31_830)]]))[0];
+        if (rawOdo != null && !isNaN(parseFloat(rawOdo))) novStartOdo = parseFloat(rawOdo);
+      } catch (e) {}
+    }
+    if (novStartOdo == null) novStartOdo = currentTotalIn;
+
+    nov = +(Math.max(
+      0,
+      lastValid.nov ? parseFloat(lastValid.nov) : 0,
+      (currentTotalIn - novStartOdo) * 25.4
+    )).toFixed(1);
+    dec = 0.0;
+  } else if (ws < L.DEC31_830) {
+    // Rain day Nov 30 08:30 AM to Dec 31 08:30 AM: December is accumulating
+    oct = +(Math.max(
+      379.7,
+      lastValid.oct_final ? parseFloat(lastValid.oct_final) : 0,
+      lastValid.oct ? parseFloat(lastValid.oct) : 0
+    )).toFixed(1);
+
+    nov = +(Math.max(
+      0,
+      lastValid.nov_final ? parseFloat(lastValid.nov_final) : 0,
+      lastValid.nov ? parseFloat(lastValid.nov) : 0
+    )).toFixed(1);
+
+    let decStartOdo = null;
+    if (lastValid.dec_start_odo && !isNaN(parseFloat(lastValid.dec_start_odo))) {
+      decStartOdo = parseFloat(lastValid.dec_start_odo);
+    } else {
+      try {
+        const rawOdo = (await L.redis([['HGET', 'ambient:baseline', String(L.NOV30_830)]]))[0];
+        if (rawOdo != null && !isNaN(parseFloat(rawOdo))) decStartOdo = parseFloat(rawOdo);
+      } catch (e) {}
+    }
+    if (decStartOdo == null) decStartOdo = currentTotalIn;
+
+    dec = +(Math.max(
+      0,
+      lastValid.dec ? parseFloat(lastValid.dec) : 0,
+      (currentTotalIn - decStartOdo) * 25.4
+    )).toFixed(1);
+  } else {
+    // Post December:
+    oct = +(Math.max(379.7, lastValid.oct_final ? parseFloat(lastValid.oct_final) : (lastValid.oct ? parseFloat(lastValid.oct) : 0))).toFixed(1);
+    nov = +(Math.max(0, lastValid.nov_final ? parseFloat(lastValid.nov_final) : (lastValid.nov ? parseFloat(lastValid.nov) : 0))).toFixed(1);
+    dec = +(Math.max(0, lastValid.dec_final ? parseFloat(lastValid.dec_final) : (lastValid.dec ? parseFloat(lastValid.dec) : 0))).toFixed(1);
+  }
 
   const nem = +(oct + nov + dec).toFixed(1);
 
@@ -111,7 +174,7 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
     yearlyIn != null ? yearlyIn * 25.4 : 0
   )).toFixed(1);
 
-  const month = todayCalDate.startsWith('2026-11') ? nov : (todayCalDate.startsWith('2026-12') ? dec : oct);
+  const month = activeRainMonth === '2026-11' ? nov : (activeRainMonth === '2026-12' ? dec : oct);
   const rate = +((hourlyIn || 0) * 25.4).toFixed(1);
 
   // Calendar day: preserve across temporary outages, but respect day change:
@@ -123,13 +186,9 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
     ) * 25.4
   ).toFixed(1);
 
-  const currentTotalIn = totalIn != null
-    ? totalIn
-    : (lastValid.totalIn != null ? parseFloat(lastValid.totalIn) : 52.24);
-
   // Update last valid in Redis:
   try {
-    await L.redis([[
+    const redisUpdates = [
       'HSET', 'ambient:last_valid',
       'oct', oct.toFixed(1),
       'nov', nov.toFixed(1),
@@ -139,7 +198,15 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
       'calDay', (dailyIn != null ? dailyIn : (isSameCalDayAsLastValid && lastValid.calDay ? parseFloat(lastValid.calDay) : 0)).toFixed(4),
       'calDayDate', todayCalDate,
       'totalIn', currentTotalIn.toFixed(4)
-    ]]);
+    ];
+    if (ws < L.OCT31_830) {
+      redisUpdates.push('oct_final', oct.toFixed(1), 'nov_start_odo', currentTotalIn.toFixed(4));
+    } else if (ws < L.NOV30_830) {
+      redisUpdates.push('nov_final', nov.toFixed(1), 'dec_start_odo', currentTotalIn.toFixed(4));
+    } else if (ws < L.DEC31_830) {
+      redisUpdates.push('dec_final', dec.toFixed(1));
+    }
+    await L.redis([redisUpdates]);
   } catch (e) {}
 
   // Baseline at 8:30 AM window start:
@@ -232,7 +299,7 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
   };
 }
 
-async function wuStation(s, now, ws, todayCalDate, rainDayStartDate) {
+async function wuStation(s, now, ws, todayCalDate, rainDayStartDate, rainDayEndDate, activeRainMonth) {
   // Fetch observations/current (updated every 1-2 mins), dailysummary/7day, and rolling 1day obs:
   const [curRes, sumRes, o5] = await Promise.all([
     L.wu('observations/current', s.id).catch(() => []),
@@ -316,7 +383,7 @@ async function wuStation(s, now, ws, todayCalDate, rainDayStartDate) {
     prevDay = KNOWN_PREV[rainDayStartDate][s.id];
   }
 
-  // 3. MONTHLY, NEM, AND YEARLY TOTALS:
+  // 3. MONTHLY, NEM, AND YEARLY TOTALS (IMD 08:30 AM METEOROLOGICAL MONTHS):
   const hist = HISTORICAL[s.id] || { octoberTotal: 0, yearTotal: 0, daysWithRain: {} };
 
   // Collect all completed days beyond Oct 21 from dailysummary/7day:
@@ -345,6 +412,20 @@ async function wuStation(s, now, ws, todayCalDate, rainDayStartDate) {
     }
   } catch (e) {}
 
+  // Extra fallback: if completed day (e.g. Oct 31 or Nov 30) is not yet in dailysummary, check 24h rolling obs (pts):
+  if (!completedDaysMap['2026-10-31'] && todayCalDate > '2026-10-31') {
+    const pts31 = pts.filter(p => L.istDate(p.t) === '2026-10-31');
+    if (pts31.length) {
+      completedDaysMap['2026-10-31'] = Math.max(...pts31.map(p => p.v));
+    }
+  }
+  if (!completedDaysMap['2026-11-30'] && todayCalDate > '2026-11-30') {
+    const pts30 = pts.filter(p => L.istDate(p.t) === '2026-11-30');
+    if (pts30.length) {
+      completedDaysMap['2026-11-30'] = Math.max(...pts30.map(p => p.v));
+    }
+  }
+
   // Automatically save any new completed days into Redis for permanent storage:
   try {
     const redisSaves = [];
@@ -354,29 +435,109 @@ async function wuStation(s, now, ws, todayCalDate, rainDayStartDate) {
     if (redisSaves.length) await L.redis(redisSaves);
   } catch (e) {}
 
-  // Sum completed days beyond Oct 21 by month:
+  // Split completed days across month boundaries per IMD 08:30 AM cutoffs:
+  // For Oct 31: rain before 08:30 AM belongs to October; rain after 08:30 AM belongs to November.
+  // For Nov 30: rain before 08:30 AM belongs to November; rain after 08:30 AM belongs to December.
   let extraOct = 0;
   let extraNov = 0;
   let extraDec = 0;
   let extraYear = 0;
-  for (const [dayStr, val] of Object.entries(completedDaysMap)) {
-    extraYear += val;
-    if (dayStr.startsWith('2026-10')) extraOct += val;
-    else if (dayStr.startsWith('2026-11')) extraNov += val;
-    else if (dayStr.startsWith('2026-12')) extraDec += val;
+
+  let oct31Cutoff = null;
+  let nov30Cutoff = null;
+
+  if (completedDaysMap['2026-10-31'] != null) {
+    try {
+      const rawCut = (await L.redis([
+        ['HGET', 'wu:cutoff_830:2026-10-31', s.id],
+        ['HGET', 'wu:baseline:' + s.id, String(L.OCT31_830)]
+      ])) || [];
+      if (rawCut[0] != null && !isNaN(parseFloat(rawCut[0]))) oct31Cutoff = parseFloat(rawCut[0]);
+      else if (rawCut[1] != null && !isNaN(parseFloat(rawCut[1]))) oct31Cutoff = parseFloat(rawCut[1]);
+    } catch (e) {}
+    if (oct31Cutoff == null) oct31Cutoff = KNOWN_BASELINES['2026-10-31']?.[s.id] ?? 0;
   }
 
-  // Live today's calendar rain is added to current active month and year:
-  const liveOct = todayCalDate.startsWith('2026-10') ? calMm : 0;
-  const liveNov = todayCalDate.startsWith('2026-11') ? calMm : 0;
-  const liveDec = todayCalDate.startsWith('2026-12') ? calMm : 0;
+  if (completedDaysMap['2026-11-30'] != null) {
+    try {
+      const rawCut = (await L.redis([
+        ['HGET', 'wu:cutoff_830:2026-11-30', s.id],
+        ['HGET', 'wu:baseline:' + s.id, String(L.NOV30_830)]
+      ])) || [];
+      if (rawCut[0] != null && !isNaN(parseFloat(rawCut[0]))) nov30Cutoff = parseFloat(rawCut[0]);
+      else if (rawCut[1] != null && !isNaN(parseFloat(rawCut[1]))) nov30Cutoff = parseFloat(rawCut[1]);
+    } catch (e) {}
+    if (nov30Cutoff == null) nov30Cutoff = KNOWN_BASELINES['2026-11-30']?.[s.id] ?? 0;
+  }
+
+  for (const [dayStr, val] of Object.entries(completedDaysMap)) {
+    extraYear += val;
+    if (dayStr === '2026-10-31') {
+      const base = oct31Cutoff != null ? Math.min(val, oct31Cutoff) : val;
+      const post = Math.max(0, val - base);
+      extraOct += base;
+      extraNov += post;
+    } else if (dayStr === '2026-11-30') {
+      const base = nov30Cutoff != null ? Math.min(val, nov30Cutoff) : val;
+      const post = Math.max(0, val - base);
+      extraNov += base;
+      extraDec += post;
+    } else if (dayStr.startsWith('2026-10')) {
+      extraOct += val;
+    } else if (dayStr.startsWith('2026-11')) {
+      extraNov += val;
+    } else if (dayStr.startsWith('2026-12')) {
+      extraDec += val;
+    }
+  }
+
+  // Live today's calendar rain is routed according to IMD 08:30 AM rain-day boundaries:
+  let liveOct = 0;
+  let liveNov = 0;
+  let liveDec = 0;
+
+  if (todayCalDate === '2026-10-31') {
+    if (ws < L.OCT31_830) {
+      liveOct = calMm;
+      liveNov = 0;
+      liveDec = 0;
+    } else {
+      // Past 08:30 AM on Oct 31: Pre-8:30 belongs to October, Post-8:30 belongs to November:
+      liveOct = p830;
+      liveNov = Math.max(0, calMm - p830);
+      liveDec = 0;
+      try {
+        await L.redis([['HSET', 'wu:cutoff_830:2026-10-31', s.id, p830.toFixed(2)]]);
+      } catch (e) {}
+    }
+  } else if (todayCalDate === '2026-11-30') {
+    if (ws < L.NOV30_830) {
+      liveOct = 0;
+      liveNov = calMm;
+      liveDec = 0;
+    } else {
+      // Past 08:30 AM on Nov 30: Pre-8:30 belongs to November, Post-8:30 belongs to December:
+      liveOct = 0;
+      liveNov = p830;
+      liveDec = Math.max(0, calMm - p830);
+      try {
+        await L.redis([['HSET', 'wu:cutoff_830:2026-11-30', s.id, p830.toFixed(2)]]);
+      } catch (e) {}
+    }
+  } else if (todayCalDate.startsWith('2026-10')) {
+    liveOct = calMm;
+  } else if (todayCalDate.startsWith('2026-11')) {
+    liveNov = calMm;
+  } else if (todayCalDate.startsWith('2026-12')) {
+    liveDec = calMm;
+  }
 
   const oct = +(hist.octoberTotal + extraOct + liveOct).toFixed(1);
   const nov = +(extraNov + liveNov).toFixed(1);
   const dec = +(extraDec + liveDec).toFixed(1);
   const nem = +(oct + nov + dec).toFixed(1);
   const year = +(hist.yearTotal + extraYear + calMm).toFixed(1);
-  const month = todayCalDate.startsWith('2026-11') ? nov : (todayCalDate.startsWith('2026-12') ? dec : oct);
+  const month = activeRainMonth === '2026-11' ? nov : (activeRainMonth === '2026-12' ? dec : oct);
 
   // 48-slot 30-min cumulative series for chart since 8:30 AM:
   const incList = L.incs(pts);
@@ -414,12 +575,13 @@ module.exports = async (req, res) => {
   const todayCalDate = L.istDate(now);
   const rainDayStartDate = L.istDate(ws);
   const rainDayEndDate = L.istDate(we);
+  const activeRainMonth = L.rainDayMonth(ws);
 
   const out = await Promise.all(
     L.STATIONS.map(s => {
       const p = s.amb
-        ? ambient(s, now, ws, todayCalDate, rainDayStartDate)
-        : wuStation(s, now, ws, todayCalDate, rainDayStartDate);
+        ? ambient(s, now, ws, todayCalDate, rainDayStartDate, rainDayEndDate, activeRainMonth)
+        : wuStation(s, now, ws, todayCalDate, rainDayStartDate, rainDayEndDate, activeRainMonth);
       return p.catch(e => ({ id: s.id, name: s.name, error: e.message }));
     })
   );
@@ -433,6 +595,7 @@ module.exports = async (req, res) => {
     todayKey: rainDayStartDate,
     rainDayStartDate,
     rainDayEndDate,
+    rainDayMonth: activeRainMonth,
     windowStart: ws,
     windowEnd: we,
     stations: out
