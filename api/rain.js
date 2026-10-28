@@ -84,20 +84,34 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
   } catch (e) {}
 
   // Safe monthly, yearly, and totalrainin with permanent floor protections:
-  // Base October floor is 210.3 mm; Year floor is 621.5 mm. It can NEVER drop to 0!
-  const month = +(Math.max(
-    210.3,
-    lastValid.month ? parseFloat(lastValid.month) : 0,
-    monthlyIn != null ? monthlyIn * 25.4 : 0
+  // Base October floor is 379.7 mm (verified Oct 2026 total); Year floor is 790.9 mm. It can NEVER drop to 0!
+  const oct = +(Math.max(
+    379.7,
+    lastValid.oct ? parseFloat(lastValid.oct) : (lastValid.month ? parseFloat(lastValid.month) : 0),
+    todayCalDate.startsWith('2026-10') && monthlyIn != null ? monthlyIn * 25.4 : 0
   )).toFixed(1);
 
+  const nov = +(Math.max(
+    0,
+    lastValid.nov ? parseFloat(lastValid.nov) : 0,
+    todayCalDate.startsWith('2026-11') && monthlyIn != null ? monthlyIn * 25.4 : 0
+  )).toFixed(1);
+
+  const dec = +(Math.max(
+    0,
+    lastValid.dec ? parseFloat(lastValid.dec) : 0,
+    todayCalDate.startsWith('2026-12') && monthlyIn != null ? monthlyIn * 25.4 : 0
+  )).toFixed(1);
+
+  const nem = +(oct + nov + dec).toFixed(1);
+
   const year = +(Math.max(
-    621.5,
+    790.9,
     lastValid.year ? parseFloat(lastValid.year) : 0,
     yearlyIn != null ? yearlyIn * 25.4 : 0
   )).toFixed(1);
 
-  const nem = month;
+  const month = todayCalDate.startsWith('2026-11') ? nov : (todayCalDate.startsWith('2026-12') ? dec : oct);
   const rate = +((hourlyIn || 0) * 25.4).toFixed(1);
 
   // Calendar day: preserve across temporary outages, but respect day change:
@@ -117,6 +131,9 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
   try {
     await L.redis([[
       'HSET', 'ambient:last_valid',
+      'oct', oct.toFixed(1),
+      'nov', nov.toFixed(1),
+      'dec', dec.toFixed(1),
       'month', month.toFixed(1),
       'year', year.toFixed(1),
       'calDay', (dailyIn != null ? dailyIn : (isSameCalDayAsLastValid && lastValid.calDay ? parseFloat(lastValid.calDay) : 0)).toFixed(4),
@@ -205,6 +222,9 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate) {
     today: todayMm,
     prevDay,
     calDay,
+    oct,
+    nov,
+    dec,
     month,
     nem,
     year,
@@ -334,18 +354,29 @@ async function wuStation(s, now, ws, todayCalDate, rainDayStartDate) {
     if (redisSaves.length) await L.redis(redisSaves);
   } catch (e) {}
 
-  // Sum completed days beyond Oct 21:
+  // Sum completed days beyond Oct 21 by month:
   let extraOct = 0;
+  let extraNov = 0;
+  let extraDec = 0;
   let extraYear = 0;
   for (const [dayStr, val] of Object.entries(completedDaysMap)) {
     extraYear += val;
     if (dayStr.startsWith('2026-10')) extraOct += val;
+    else if (dayStr.startsWith('2026-11')) extraNov += val;
+    else if (dayStr.startsWith('2026-12')) extraDec += val;
   }
 
-  // Live today's calendar rain is added to month and year:
-  const month = +(hist.octoberTotal + extraOct + calMm).toFixed(1);
+  // Live today's calendar rain is added to current active month and year:
+  const liveOct = todayCalDate.startsWith('2026-10') ? calMm : 0;
+  const liveNov = todayCalDate.startsWith('2026-11') ? calMm : 0;
+  const liveDec = todayCalDate.startsWith('2026-12') ? calMm : 0;
+
+  const oct = +(hist.octoberTotal + extraOct + liveOct).toFixed(1);
+  const nov = +(extraNov + liveNov).toFixed(1);
+  const dec = +(extraDec + liveDec).toFixed(1);
+  const nem = +(oct + nov + dec).toFixed(1);
   const year = +(hist.yearTotal + extraYear + calMm).toFixed(1);
-  const nem = month;
+  const month = todayCalDate.startsWith('2026-11') ? nov : (todayCalDate.startsWith('2026-12') ? dec : oct);
 
   // 48-slot 30-min cumulative series for chart since 8:30 AM:
   const incList = L.incs(pts);
@@ -366,6 +397,9 @@ async function wuStation(s, now, ws, todayCalDate, rainDayStartDate) {
     today: todayMm,
     prevDay,
     calDay: calMm,
+    oct,
+    nov,
+    dec,
     month,
     nem,
     year,

@@ -18,10 +18,22 @@ h1{font-size:22px;margin:0}.sub{color:var(--mut);font-size:13px}
 .top{margin:10px 0 6px}
 .big{font-size:48px;font-weight:600;line-height:1}.u{font-size:15px;color:var(--mut);margin-left:4px}
 .rr{text-align:right}.rr b{font-size:22px;color:var(--rr)}.rr.wet b{color:#4fd1ff}
-.sub-row{display:flex;justify-content:space-between;background:#0c111c;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:10px 0 12px;font-size:11px;color:var(--mut)}
+.sub-row{display:flex;justify-content:space-between;background:#0c111c;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:10px 0 10px;font-size:11px;color:var(--mut)}
 .sub-row b{color:var(--tx);font-size:12px;margin-left:4px}
-.row{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);padding-top:12px}
-.row div{text-align:center}.row small{display:block;color:var(--mut);font-size:11px}.row b{font-size:15px}
+.nem-section{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+.nem-head{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;color:var(--hd);text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}
+.nem-active-tag{color:#38bdf8;font-size:10px;background:rgba(56,189,248,0.12);padding:2px 6px;border-radius:4px;border:1px solid rgba(56,189,248,0.3)}
+.nem-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.nem-cell{background:#0c111c;border:1px solid var(--line);border-radius:8px;padding:7px 4px;text-align:center;transition:all .2s}
+.nem-cell.cur-m{border-color:rgba(56,189,248,0.45);background:rgba(56,189,248,0.08);box-shadow:0 0 8px rgba(56,189,248,0.15)}
+.nem-cell small{display:block;color:var(--mut);font-size:10px;font-weight:700;text-transform:uppercase;margin-bottom:3px;letter-spacing:.4px}
+.nem-cell b{font-size:14px;color:var(--tx);font-weight:700;font-family:'Outfit',sans-serif}
+.nem-cell.cur-m b{color:#38bdf8}
+.nem-cell .unit{font-size:10px;color:var(--mut);font-weight:500;margin-left:2px}
+.totals-row{display:grid;grid-template-columns:1.15fr 0.85fr;gap:8px;border-top:1px dashed var(--line);padding-top:10px;margin-top:10px;text-align:center}
+.totals-row small{display:block;color:var(--mut);font-size:11px;margin-bottom:2px}
+.tot-nem{font-size:16px;color:#c084fc;font-weight:800}
+.tot-yr{font-size:16px;color:#f3f5fa;font-weight:700}
 .stale{color:#e0a458;font-size:12px}.err{color:#ff7a7a;font-size:13px}
 #chartbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;height:min(70vh,520px)}
 .hide{display:none}
@@ -242,6 +254,8 @@ function drawExportCanvas(sorted, topStation, avgVal, rainDate){
 
 function render(){
   const startD = data.rainDayStartDate || data.todayKey;
+  const curM = (startD || '').slice(5, 7);
+  const curMonthName = curM === '11' ? 'November' : (curM === '12' ? 'December' : 'October');
   $('meta').innerHTML=`<span class="live-dot"></span>Rain Day: <b>${startD}</b> (8:30 am IST → next day 8:30 am IST) · updated <b>${fmt(data.updated)} IST</b> <span class="sub" style="font-size:11px">· live auto-update 30s</span>`;
   
   // 1. Grid of Stations
@@ -262,10 +276,29 @@ function render(){
       <div><span>Yesterday (ended 8:30am):</span> <b>${s.prevDay != null ? s.prevDay : '-'} mm</b></div>
       <div><span>Calendar day:</span> <b>${s.calDay != null ? s.calDay : '-'} mm</b></div>
     </div>
-    <div class="row">
-      <div><small>Monthly (Oct)</small><b>${s.month} mm</b></div>
-      <div><small>NEM (from Oct 1)</small><b>${s.nem} mm</b></div>
-      <div><small>Yearly (2026)</small><b>${s.year} mm</b></div>
+    <div class="nem-section">
+      <div class="nem-head">
+        <span>NEM Rainfall (Oct–Dec)</span>
+        <span class="nem-active-tag">${curMonthName} Active</span>
+      </div>
+      <div class="nem-grid">
+        <div class="nem-cell ${curM==='10'?'cur-m':''}">
+          <small>Oct</small>
+          <b>${s.oct != null ? s.oct : s.month}<span class="unit">mm</span></b>
+        </div>
+        <div class="nem-cell ${curM==='11'?'cur-m':''}">
+          <small>Nov</small>
+          <b>${s.nov != null ? s.nov : '0.0'}<span class="unit">mm</span></b>
+        </div>
+        <div class="nem-cell ${curM==='12'?'cur-m':''}">
+          <small>Dec</small>
+          <b>${s.dec != null ? s.dec : '0.0'}<span class="unit">mm</span></b>
+        </div>
+      </div>
+    </div>
+    <div class="totals-row">
+      <div><small>NEM Season Total</small><b class="tot-nem">${s.nem} mm</b></div>
+      <div><small>Yearly (2026)</small><b class="tot-yr">${s.year} mm</b></div>
     </div>
   </div>`).join('');
 
