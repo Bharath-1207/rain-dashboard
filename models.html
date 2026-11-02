@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>Weather Models &amp; Forecast Maps | Pondy &amp; Auroville Rain Network</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -11,6 +12,7 @@
 :root {
   --bg: #0f1420;
   --card: #151b2b;
+  --card-hover: #1b2338;
   --line: #232c42;
   --tx: #f3f5fa;
   --mut: #8b94ab;
@@ -131,7 +133,7 @@ h1 { font-size: 22px; margin: 0; }
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
-  height: min(82vh, 760px);
+  height: min(84vh, 780px);
   display: flex;
 }
 .map-frame-box {
@@ -332,7 +334,7 @@ h1 { font-size: 22px; margin: 0; }
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.88);
+  background: rgba(0, 0, 0, 0.9);
   backdrop-filter: blur(10px);
   z-index: 9999;
   display: none;
@@ -382,7 +384,7 @@ h1 { font-size: 22px; margin: 0; }
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 22px;
+  padding: 24px;
 }
 .meteo-form {
   display: grid;
@@ -397,6 +399,7 @@ h1 { font-size: 22px; margin: 0; }
   font-weight: 700;
   text-transform: uppercase;
   margin-bottom: 6px;
+  letter-spacing: .5px;
 }
 .meteo-field select, .meteo-field input {
   width: 100%;
@@ -405,22 +408,57 @@ h1 { font-size: 22px; margin: 0; }
   color: var(--tx);
   padding: 10px 12px;
   border-radius: 8px;
-  font: 600 14px Outfit, sans-serif;
+  font: 600 13px Outfit, sans-serif;
   outline: none;
+  transition: border-color .2s;
 }
 .meteo-field select:focus {
   border-color: var(--cyan);
+}
+.meteo-url-preview {
+  background: #090e1a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: var(--cyan);
+  word-break: break-all;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.meteo-url-preview span {
+  flex: 1;
+}
+.btn-copy-url {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: var(--cyan);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: Outfit, sans-serif;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-copy-url:hover {
+  background: rgba(56, 189, 248, 0.25);
 }
 .meteo-actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 22px;
 }
 .btn-primary {
   background: linear-gradient(135deg, #0284c7, #2563eb);
   color: #fff;
   border: none;
-  padding: 10px 20px;
+  padding: 11px 22px;
   border-radius: 8px;
   font: 700 14px Outfit, sans-serif;
   cursor: pointer;
@@ -429,17 +467,55 @@ h1 { font-size: 22px; margin: 0; }
   align-items: center;
   gap: 8px;
   transition: all .2s;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
 }
 .btn-primary:hover {
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.55);
   transform: translateY(-1px);
+}
+
+.quick-links-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mut);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin: 18px 0 10px;
+}
+.quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quick-chip {
+  background: #0d1322;
+  border: 1px solid var(--line);
+  color: var(--tx);
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all .2s;
+}
+.quick-chip:hover {
+  border-color: var(--cyan);
+  background: rgba(56, 189, 248, 0.1);
+  color: #fff;
+}
+.quick-chip b {
+  color: var(--cyan);
 }
 
 @media (max-width: 768px) {
   body { padding: 12px; }
   .plots-grid { grid-template-columns: 1fr; }
   .map-wrap { height: 75vh; }
+  .meteo-form { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -477,7 +553,7 @@ h1 { font-size: 22px; margin: 0; }
     <span class="info-icon">🗺️</span>
     <div class="info-text">
       <h3>Interactive 6-Hourly Rainfall Forecast (Day 1 – 3)</h3>
-      <p>Blends numerical models (<b>ECMWF HRES, GFS</b>), ensemble systems (<b>EPS</b>), and cutting-edge machine learning models (<b>ECMWF AIFS, Google WeatherNext 3</b>) across the Indian subcontinent with zoom down to Puducherry &amp; Auroville. Select any model combination on the right to blend live.</p>
+      <p>Blends numerical models (<b>ECMWF HRES, GFS</b>), ensemble systems (<b>EPS</b>), and cutting-edge machine learning models (<b>ECMWF AIFS, Google WeatherNext 3</b>) across the Indian subcontinent with dynamic zoom down to Puducherry &amp; Auroville. Select any model combination on the right to blend live with time step and transparency sliders.</p>
     </div>
   </div>
 
@@ -485,9 +561,10 @@ h1 { font-size: 22px; margin: 0; }
     <div class="map-toolbar">
       <button class="map-btn" id="btn-fullscreen-map">⛶ Open Fullscreen</button>
       <button class="map-btn" onclick="document.getElementById('sixhr-frame').src += ''">↻ Reload Map</button>
+      <a class="map-btn" href="https://plots.chennairains.com/six_hourly_rainfall.html" target="_blank" rel="noopener">↗ Open Map in New Tab</a>
     </div>
     <div class="map-frame-box">
-      <iframe id="sixhr-frame" class="map-iframe" src="https://plots.chennairains.com/six_hourly_rainfall.html" title="Interactive 6-Hourly Rainfall Blend Map" allowfullscreen></iframe>
+      <iframe id="sixhr-frame" class="map-iframe" src="https://plots.chennairains.com/six_hourly_rainfall.html" title="Interactive 6-Hourly Rainfall Blend Map" referrerpolicy="no-referrer" allowfullscreen></iframe>
     </div>
   </div>
 </div>
@@ -506,9 +583,9 @@ h1 { font-size: 22px; margin: 0; }
 
   <div class="plot-filters">
     <button class="filter-btn active" data-filter="all">All Wind Levels</button>
-    <button class="filter-btn" data-filter="850">850 hPa Streamlines</button>
+    <button class="filter-btn" data-filter="850">850 hPa Streamlines &amp; Flow</button>
     <button class="filter-btn" data-filter="surface">10 m Surface Convergence</button>
-    <button class="filter-btn" data-filter="500">500 hPa Steering</button>
+    <button class="filter-btn" data-filter="500">500 hPa Steering Flow</button>
   </div>
 
   <div class="plots-grid" id="wind-grid">
@@ -530,9 +607,9 @@ h1 { font-size: 22px; margin: 0; }
 
   <div class="plot-filters">
     <button class="filter-btn active" data-rain-filter="all">All Horizons</button>
-    <button class="filter-btn" data-rain-filter="24h">Next 24h Rain</button>
+    <button class="filter-btn" data-rain-filter="24h">Next 24h Rain (Daily)</button>
     <button class="filter-btn" data-rain-filter="7d">7-Day Accumulated</button>
-    <button class="filter-btn" data-rain-filter="14d">14-Day Accumulated</button>
+    <button class="filter-btn" data-rain-filter="14d">14-Day Extended</button>
   </div>
 
   <div class="plots-grid" id="rain-grid">
@@ -548,7 +625,7 @@ h1 { font-size: 22px; margin: 0; }
     <span class="info-icon">📊</span>
     <div class="info-text">
       <h3>Meteologix Direct Model Charts: Puducherry Sector (79.1° E, 12.2° N)</h3>
-      <p>Explore ECMWF IFS HRES, ECMWF AIFS (AI), and GFS forecast cycles directly for the Puducherry &amp; Auroville region. Select model, parameter, and forecast horizon to launch the high-resolution Meteologix diagnostic chart.</p>
+      <p>Explore ECMWF IFS HRES, ECMWF AIFS (AI Operational), and GFS forecast cycles directly for the Puducherry &amp; Auroville sector. The system computes the valid forecast timestamp dynamically so every generated link resolves with 100% reliability.</p>
     </div>
   </div>
 
@@ -557,10 +634,9 @@ h1 { font-size: 22px; margin: 0; }
       <div class="meteo-field">
         <label>Forecast Model</label>
         <select id="meteo-model">
-          <option value="euro" selected>ECMWF IFS HRES (0z / 12z - 15 Days)</option>
-          <option value="euro-ai">ECMWF AIFS (AI Operational - 15 Days)</option>
-          <option value="gfs">GFS (NOAA NCEP - 16 Days)</option>
-          <option value="rapid-euro">Rapid ECMWF (06z / 18z)</option>
+          <option value="euro" selected>ECMWF IFS HRES (0z / 12z - 9km 15 Days)</option>
+          <option value="euro-ai">ECMWF AIFS (Deep Learning AI - 15 Days)</option>
+          <option value="gfs">GFS (NOAA NCEP - 0.25° 16 Days)</option>
         </select>
       </div>
 
@@ -577,22 +653,77 @@ h1 { font-size: 22px; margin: 0; }
       </div>
 
       <div class="meteo-field">
-        <label>Sector / Location</label>
+        <label>Sector / Coordinate Area</label>
         <select id="meteo-area">
           <option value="791-e-122-n" selected>Puducherry &amp; Auroville (79.1° E, 12.2° N)</option>
-          <option value="80.0-e-13.0-n">North Coastal TN &amp; Chennai (80.0° E, 13.0° N)</option>
-          <option value="79.8-e-10.2-n">Delta &amp; Nagapattinam (79.8° E, 10.2° N)</option>
+          <option value="800-e-130-n">North Coastal TN &amp; Chennai (80.0° E, 13.0° N)</option>
+          <option value="798-e-102-n">Delta Coast &amp; Nagapattinam (79.8° E, 10.2° N)</option>
+        </select>
+      </div>
+
+      <div class="meteo-field">
+        <label>Synoptic Run Cycle</label>
+        <select id="meteo-run">
+          <option value="00" selected>00z Cycle (Morning 5:30 AM IST Run)</option>
+          <option value="06">06z Cycle (Midday 11:30 AM IST Run)</option>
+          <option value="12">12z Cycle (Evening 5:30 PM IST Run)</option>
+          <option value="18">18z Cycle (Night 11:30 PM IST Run)</option>
+        </select>
+      </div>
+
+      <div class="meteo-field">
+        <label>Forecast Horizon / Lead Time</label>
+        <select id="meteo-lead">
+          <option value="33" selected>+33 Hours (Tomorrow Afternoon 0900z - User Default)</option>
+          <option value="12">+12 Hours (Tonight / 12h Lead)</option>
+          <option value="24">+24 Hours (Tomorrow Morning 8:30 AM IST)</option>
+          <option value="48">+48 Hours (Day 2 Forecast)</option>
+          <option value="72">+72 Hours (Day 3 Forecast)</option>
+          <option value="120">+120 Hours (Day 5 Extended Range)</option>
+          <option value="240">+240 Hours (Day 10 Medium Range)</option>
         </select>
       </div>
     </div>
 
+    <!-- Live Target URL preview -->
+    <div class="meteo-url-preview">
+      <span id="meteo-preview-url">Generating URL...</span>
+      <button class="btn-copy-url" onclick="copyMeteoUrl()">📋 Copy URL</button>
+    </div>
+
     <div class="meteo-actions">
-      <a id="btn-open-meteo" href="https://meteologix.com/in/model-charts/euro/791-e-122-n/wind-mean-850hpa/" target="_blank" rel="noopener" class="btn-primary">
+      <a id="btn-open-meteo" href="https://meteologix.com/in/model-charts/euro/791-e-122-n/wind-mean-850hpa/20261103-0900z.html" target="_blank" rel="noopener" class="btn-primary">
         🚀 Open Chart on Meteologix.com →
       </a>
       <button class="btn-ref" onclick="window.open('https://plots.chennairains.com/daily_plots.html','_blank')">
         📋 View COMK 34 Daily Plots
       </button>
+      <button class="btn-ref" onclick="window.open('https://plots.chennairains.com/daily_plots/COMK_Daily_weather_plots.pdf','_blank')">
+        📥 Download All 34 Plots as PDF
+      </button>
+    </div>
+
+    <!-- Curated Quick Launchers -->
+    <div class="quick-links-title">⚡ Curated One-Click Model Launchers for Puducherry Sector</div>
+    <div class="quick-chips">
+      <a class="quick-chip" href="https://meteologix.com/in/model-charts/euro/791-e-122-n/wind-mean-850hpa/20261103-0900z.html" target="_blank" rel="noopener">
+        🌀 <b>ECMWF</b> 850 hPa Wind &amp; Streamlines (Exact Link)
+      </a>
+      <a class="quick-chip" id="quick-ecmwf-24h" href="#" target="_blank" rel="noopener">
+        🌧️ <b>ECMWF</b> 24h Precipitation Accumulation
+      </a>
+      <a class="quick-chip" id="quick-ecmwf-accum" href="#" target="_blank" rel="noopener">
+        🌊 <b>ECMWF</b> Total Accumulated Rainfall
+      </a>
+      <a class="quick-chip" id="quick-aifs-850" href="#" target="_blank" rel="noopener">
+        🤖 <b>AIFS (AI)</b> 850 hPa Wind Flow
+      </a>
+      <a class="quick-chip" id="quick-aifs-accum" href="#" target="_blank" rel="noopener">
+        🤖 <b>AIFS (AI)</b> Total Accumulated Rainfall
+      </a>
+      <a class="quick-chip" id="quick-gfs-850" href="#" target="_blank" rel="noopener">
+        🇺🇸 <b>GFS</b> 850 hPa Wind &amp; Streamlines
+      </a>
     </div>
   </div>
 </div>
@@ -601,7 +732,7 @@ h1 { font-size: 22px; margin: 0; }
 <div id="lightbox" class="modal-overlay" onclick="closeModal(event)">
   <div class="modal-content" onclick="event.stopPropagation()">
     <button class="modal-close" onclick="closeModal()">&times;</button>
-    <img id="modal-img" class="modal-img" src="" alt="Forecast Chart">
+    <img id="modal-img" class="modal-img" src="" alt="Forecast Chart" referrerpolicy="no-referrer">
     <div id="modal-caption" class="modal-caption"></div>
   </div>
 </div>
@@ -609,150 +740,155 @@ h1 { font-size: 22px; margin: 0; }
 <script>
 const $ = id => document.getElementById(id);
 
-// Default Built-in Plots for instant zero-latency render
+// Robust plot proxy URL helper
+function getPlotProxyUrl(fileName) {
+  return `/api/plot?id=${encodeURIComponent(fileName)}`;
+}
+
+// Built-in catalog of key forecast plots
 const DEFAULT_PLOTS = [
   {
     id: 'p04',
+    file: 'plot_04.jpg',
     title: 'South India 24-Hour Rainfall Estimate',
     model: 'ECMWF (Ensemble + HRES)',
     category: 'precip24',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_04.jpg',
     desc: 'ECMWF high-resolution (HRES) combined with 51 ensemble members for 24h accumulation.'
   },
   {
     id: 'p05',
+    file: 'plot_05.jpg',
     title: 'South India Weighted Multi-Model Blend',
     model: 'Multi-Model Blend',
     category: 'precip24',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_05.jpg',
     desc: 'Optimal weighted blend of ECMWF, GFS, ICON, GEM, and AI models.'
   },
   {
     id: 'p06',
+    file: 'plot_06.jpg',
     title: 'South India 24-Hour Rainfall (WeatherNext 3)',
     model: 'WeatherNext 3 (Google DeepMind)',
     category: 'precip24',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_06.jpg',
     desc: 'Google DeepMind AI model forecasting 24h rainfall using direct satellite mosaic ingestion.'
   },
   {
     id: 'p07',
+    file: 'plot_07.jpg',
     title: 'Tamil Nadu & Puducherry 24-Hour Rainfall',
     model: 'ECMWF (Ensemble + HRES)',
     category: 'precip24',
     region: 'Tamil Nadu',
-    url: 'https://plots.chennairains.com/daily_plots/plot_07.jpg',
     desc: 'Regional zoom for Tamil Nadu, Puducherry, and Karaikal coastal districts.'
   },
   {
     id: 'p08',
+    file: 'plot_08.jpg',
     title: 'Tamil Nadu & Puducherry Multi-Model Blend',
     model: 'Multi-Model Blend',
     category: 'precip24',
     region: 'Tamil Nadu',
-    url: 'https://plots.chennairains.com/daily_plots/plot_08.jpg',
     desc: 'High-confidence regional multi-model blend across Tamil Nadu and Puducherry.'
   },
   {
     id: 'p09',
+    file: 'plot_09.jpg',
     title: 'Tamil Nadu & Puducherry (WeatherNext 3)',
     model: 'WeatherNext 3 (Google DeepMind)',
     category: 'precip24',
     region: 'Tamil Nadu',
-    url: 'https://plots.chennairains.com/daily_plots/plot_09.jpg',
     desc: 'Google AI localized 24h precipitation forecast for Tamil Nadu and coastal belt.'
   },
   {
     id: 'p12',
+    file: 'plot_12.jpg',
     title: 'South India 7-Day Accumulated Rainfall',
     model: 'ECMWF (Ensemble + HRES)',
     category: 'accum',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_12.jpg',
     desc: 'Total precipitation expected over the next 7 days across South India.'
   },
   {
     id: 'p13',
+    file: 'plot_13.jpg',
     title: 'South India 7-Day Multi-Model Blend',
     model: 'Multi-Model Blend',
     category: 'accum',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_13.jpg',
     desc: 'Consensus 7-day cumulative rainfall total from global ensemble models.'
   },
   {
     id: 'p14',
+    file: 'plot_14.jpg',
     title: 'South India 7-Day Rainfall (WeatherNext 3)',
     model: 'WeatherNext 3 (Google DeepMind)',
     category: 'accum',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_14.jpg',
     desc: 'Google DeepMind 7-day total precipitation forecast.'
   },
   {
     id: 'p15',
+    file: 'plot_15.jpg',
     title: 'Tamil Nadu & Puducherry 7-Day Accumulated Rain',
     model: 'ECMWF (Ensemble + HRES)',
     category: 'accum',
     region: 'Tamil Nadu',
-    url: 'https://plots.chennairains.com/daily_plots/plot_15.jpg',
     desc: '7-day cumulative total for coastal and interior Tamil Nadu & Puducherry.'
   },
   {
     id: 'p17',
+    file: 'plot_17.jpg',
     title: 'Tamil Nadu & Puducherry 7-Day (WeatherNext 3)',
     model: 'WeatherNext 3 (Google DeepMind)',
     category: 'accum',
     region: 'Tamil Nadu',
-    url: 'https://plots.chennairains.com/daily_plots/plot_17.jpg',
     desc: 'AI 7-day cumulative rainfall total.'
   },
   {
     id: 'p20',
+    file: 'plot_20.jpg',
     title: 'South India 14-Day Accumulated Rainfall',
     model: 'ECMWF Extended',
     category: 'accum',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_20.jpg',
     desc: 'Two-week extended range cumulative rainfall estimate.'
   },
   {
     id: 'p31',
+    file: 'plot_31.jpg',
     title: '10 m Surface Wind Convergence (South India)',
     model: 'Surface Winds (10m)',
     category: 'wind',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_31.jpg',
     desc: 'Near-surface 10 m wind speeds and convergence lines along the Coromandel coast.'
   },
   {
     id: 'p32',
+    file: 'plot_32.jpg',
     title: '850 hPa Wind Speed & Streamlines (South India)',
     model: '850 hPa Level (~1.5 km)',
     category: 'wind',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_32.jpg',
     desc: 'Lower troposphere steering winds at 850 hPa showing easterly waves and Bay circulations.'
   },
   {
     id: 'p33',
+    file: 'plot_33.jpg',
     title: '850 hPa Mean Wind Flow (Day 1)',
     model: '850 hPa Mean Wind',
     category: 'wind',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_33.jpg',
     desc: 'Day 1 integrated 850 hPa wind flow vectors and shear zones.'
   },
   {
     id: 'p34',
+    file: 'plot_34.jpg',
     title: '500 hPa Mid-Troposphere Mean Wind',
     model: '500 hPa Level (~5.5 km)',
     category: 'wind',
     region: 'South India',
-    url: 'https://plots.chennairains.com/daily_plots/plot_34.jpg',
     desc: 'Steering flow for deep convection and upper-air troughs.'
   }
 ];
@@ -786,21 +922,57 @@ $('btn-fullscreen-map').onclick = () => {
   }
 };
 
-// Meteologix URL Builder
+// Meteologix Valid-Time URL Calculator
+function calculateMeteoValidStr(runHour, leadHours) {
+  const now = new Date();
+  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), parseInt(runHour, 10) + parseInt(leadHours, 10), 0, 0));
+  const yyyy = base.getUTCFullYear();
+  const mm = String(base.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(base.getUTCDate()).padStart(2, '0');
+  const hh = String(base.getUTCHours()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}-${hh}00z`;
+}
+
+function buildMeteologixUrl(model, area, param, runHour, leadHours) {
+  const timeStr = calculateMeteoValidStr(runHour, leadHours);
+  return `https://meteologix.com/in/model-charts/${model}/${area}/${param}/${timeStr}.html`;
+}
+
 function updateMeteoUrl() {
   const model = $('meteo-model').value;
   const param = $('meteo-param').value;
   const area = $('meteo-area').value;
-  const url = `https://meteologix.com/in/model-charts/${model}/${area}/${param}/`;
+  const run = $('meteo-run').value;
+  const lead = $('meteo-lead').value;
+
+  const url = buildMeteologixUrl(model, area, param, run, lead);
   $('btn-open-meteo').href = url;
+  $('meteo-preview-url').textContent = url;
+
+  // Update quick launchers
+  $('quick-ecmwf-24h').href = buildMeteologixUrl('euro', '791-e-122-n', 'precipitation-24h', run, 24);
+  $('quick-ecmwf-accum').href = buildMeteologixUrl('euro', '791-e-122-n', 'precipitation-total', run, 48);
+  $('quick-aifs-850').href = buildMeteologixUrl('euro-ai', '791-e-122-n', 'wind-mean-850hpa', run, 33);
+  $('quick-aifs-accum').href = buildMeteologixUrl('euro-ai', '791-e-122-n', 'precipitation-total', run, 48);
+  $('quick-gfs-850').href = buildMeteologixUrl('gfs', '791-e-122-n', 'wind-mean-850hpa', run, 33);
 }
+
 $('meteo-model').onchange = updateMeteoUrl;
 $('meteo-param').onchange = updateMeteoUrl;
 $('meteo-area').onchange = updateMeteoUrl;
+$('meteo-run').onchange = updateMeteoUrl;
+$('meteo-lead').onchange = updateMeteoUrl;
+
+function copyMeteoUrl() {
+  const url = $('btn-open-meteo').href;
+  navigator.clipboard.writeText(url).then(() => {
+    alert('Meteologix URL copied to clipboard:\n' + url);
+  });
+}
 
 // Lightbox Modal
-function openModal(url, title) {
-  $('modal-img').src = url;
+function openModal(proxyUrl, title, file) {
+  $('modal-img').src = proxyUrl;
   $('modal-caption').textContent = title;
   $('lightbox').classList.add('open');
 }
@@ -820,10 +992,20 @@ function renderPlots() {
   const windPlots = modelData.plots.filter(p => p.category === 'wind');
   const rainPlots = modelData.plots.filter(p => p.category === 'precip24' || p.category === 'accum');
 
-  windGrid.innerHTML = windPlots.map(p => `
+  windGrid.innerHTML = windPlots.map(p => {
+    const fileName = p.file || (p.id.endsWith('.jpg') ? p.id : `${p.id}.jpg`);
+    const proxyUrl = getPlotProxyUrl(fileName);
+    const directUrl = `https://plots.chennairains.com/daily_plots/${fileName}`;
+    return `
     <div class="plot-card" data-category="${p.id === 'p31' ? 'surface' : p.id === 'p34' ? '500' : '850'}">
-      <div class="plot-thumb-wrap" onclick="openModal('${p.url}', '${p.title}')">
-        <img class="plot-thumb" src="${p.url}" alt="${p.title}" loading="lazy">
+      <div class="plot-thumb-wrap" onclick="openModal('${proxyUrl}', '${p.title}', '${fileName}')">
+        <img class="plot-thumb" 
+             src="${proxyUrl}" 
+             alt="${p.title}" 
+             loading="lazy"
+             referrerpolicy="no-referrer"
+             data-file="${fileName}"
+             onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.src='${directUrl}';}">
         <span class="plot-badge">${p.model}</span>
       </div>
       <div class="plot-info">
@@ -831,17 +1013,28 @@ function renderPlots() {
         <div class="plot-model">${p.model} · ${p.region}</div>
         <p class="plot-desc">${p.desc}</p>
         <div class="plot-actions">
-          <button class="btn-card" onclick="openModal('${p.url}', '${p.title}')">🔍 Full Size</button>
-          <a class="btn-card" href="${p.url}" target="_blank" download="${p.title}.jpg">📥 Download</a>
+          <button class="btn-card" onclick="openModal('${proxyUrl}', '${p.title}', '${fileName}')">🔍 Full Size</button>
+          <a class="btn-card" href="${proxyUrl}" download="${fileName}" referrerpolicy="no-referrer">📥 Download</a>
         </div>
       </div>
     </div>
-  `).join('');
+    `;
+  }).join('');
 
-  rainGrid.innerHTML = rainPlots.map(p => `
+  rainGrid.innerHTML = rainPlots.map(p => {
+    const fileName = p.file || (p.id.endsWith('.jpg') ? p.id : `${p.id}.jpg`);
+    const proxyUrl = getPlotProxyUrl(fileName);
+    const directUrl = `https://plots.chennairains.com/daily_plots/${fileName}`;
+    return `
     <div class="plot-card" data-horizon="${p.category === 'precip24' ? '24h' : p.id === 'p20' ? '14d' : '7d'}">
-      <div class="plot-thumb-wrap" onclick="openModal('${p.url}', '${p.title}')">
-        <img class="plot-thumb" src="${p.url}" alt="${p.title}" loading="lazy">
+      <div class="plot-thumb-wrap" onclick="openModal('${proxyUrl}', '${p.title}', '${fileName}')">
+        <img class="plot-thumb" 
+             src="${proxyUrl}" 
+             alt="${p.title}" 
+             loading="lazy"
+             referrerpolicy="no-referrer"
+             data-file="${fileName}"
+             onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.src='${directUrl}';}">
         <span class="plot-badge">${p.category === 'precip24' ? '24h Rain' : p.id === 'p20' ? '14-Day' : '7-Day'}</span>
       </div>
       <div class="plot-info">
@@ -849,12 +1042,13 @@ function renderPlots() {
         <div class="plot-model">${p.model} · ${p.region}</div>
         <p class="plot-desc">${p.desc}</p>
         <div class="plot-actions">
-          <button class="btn-card" onclick="openModal('${p.url}', '${p.title}')">🔍 Full Size</button>
-          <a class="btn-card" href="${p.url}" target="_blank" download="${p.title}.jpg">📥 Download</a>
+          <button class="btn-card" onclick="openModal('${proxyUrl}', '${p.title}', '${fileName}')">🔍 Full Size</button>
+          <a class="btn-card" href="${proxyUrl}" download="${fileName}" referrerpolicy="no-referrer">📥 Download</a>
         </div>
       </div>
     </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // Wind Filter
@@ -881,7 +1075,8 @@ document.querySelectorAll('[data-rain-filter]').forEach(btn => {
   };
 });
 
-// Initial render
+// Initial render & URL calculation
+updateMeteoUrl();
 renderPlots();
 
 // Dynamic API fetch
@@ -897,7 +1092,7 @@ async function loadModels() {
       }
     }
   } catch (e) {
-    console.log('Using offline initial plots cache');
+    console.log('Using initial plots cache');
   }
 }
 
