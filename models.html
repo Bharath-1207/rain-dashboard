@@ -897,20 +897,31 @@ let modelData = { plots: DEFAULT_PLOTS };
 
 // Tab Switching
 const tabs = [
-  { btn: 'tab-map', view: 'view-map' },
-  { btn: 'tab-wind', view: 'view-wind' },
-  { btn: 'tab-rain', view: 'view-rain' },
-  { btn: 'tab-meteo', view: 'view-meteo' }
+  { name: 'map', btn: 'tab-map', view: 'view-map' },
+  { name: 'wind', btn: 'tab-wind', view: 'view-wind' },
+  { name: 'rain', btn: 'tab-rain', view: 'view-rain' },
+  { name: 'meteo', btn: 'tab-meteo', view: 'view-meteo' }
 ];
 
+function selectTab(tabName) {
+  const target = tabs.find(t => t.name === tabName || t.btn === tabName) || tabs[0];
+  tabs.forEach(x => {
+    $(x.btn).classList.toggle('on', x.name === target.name);
+    $(x.view).classList.toggle('active', x.name === target.name);
+  });
+  if (location.hash !== '#' + target.name) {
+    history.replaceState(null, '', '#' + target.name);
+  }
+}
+
 tabs.forEach(t => {
-  $(t.btn).onclick = () => {
-    tabs.forEach(x => {
-      $(x.btn).classList.toggle('on', x.btn === t.btn);
-      $(x.view).classList.toggle('active', x.view === t.view);
-    });
-  };
+  $(t.btn).onclick = () => selectTab(t.name);
 });
+
+if (location.hash) {
+  const h = location.hash.replace('#', '').toLowerCase();
+  selectTab(h);
+}
 
 // Fullscreen Map Toggle
 $('btn-fullscreen-map').onclick = () => {
