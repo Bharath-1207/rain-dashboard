@@ -24,6 +24,17 @@ const KNOWN_PREV = {
     'IAUROV11': 38.1,
     'IVANUR5': 23.9,
     'AMBIENT': 34.8
+  },
+  // Rain day Nov 2 8:30am -> Nov 3 8:30am:
+  '2026-11-03': {
+    'IPONDI5': 41.4,
+    'IPONDI9': 38.8,
+    'IPONDI10': 28.5,
+    'IAUROV6': 55.4,
+    'IAUROV10': 32.0,
+    'IAUROV11': 15.5,
+    'IVANUR5': 14.7,
+    'AMBIENT': 64.7
   }
 };
 
@@ -48,6 +59,15 @@ const KNOWN_BASELINES = {
     'IAUROV11': 38.10,
     'IVANUR5': 23.88,
     'AMBIENT': 52.24
+  },
+  '2026-10-31': {
+    'AMBIENT': 58.910
+  },
+  '2026-11-02': {
+    'AMBIENT': 58.922
+  },
+  '2026-11-03': {
+    'AMBIENT': 61.469
   }
 };
 
@@ -126,7 +146,8 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate, rainDayEndDat
     nov = +(Math.max(
       0,
       lastValid.nov ? parseFloat(lastValid.nov) : 0,
-      (currentTotalIn - novStartOdo) * 25.4
+      todayCalDate.startsWith('2026-11') && monthlyIn != null ? monthlyIn * 25.4 : 0,
+      novStartOdo != null ? (currentTotalIn - novStartOdo) * 25.4 : 0
     )).toFixed(1);
     dec = 0.0;
   } else if (ws < L.DEC31_830) {
@@ -211,22 +232,29 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate, rainDayEndDat
 
   // Baseline at 8:30 AM window start:
   let baseline = null;
-  try {
-    const raw = (await L.redis([['HGET', 'ambient:baseline', String(ws)]]))[0];
-    if (raw != null && !isNaN(parseFloat(raw))) baseline = parseFloat(raw);
-  } catch (e) {}
+  const knownBase = KNOWN_BASELINES[rainDayStartDate]?.['AMBIENT'];
+  if (knownBase != null) {
+    baseline = knownBase;
+  } else {
+    try {
+      const raw = (await L.redis([['HGET', 'ambient:baseline', String(ws)]]))[0];
+      if (raw != null && !isNaN(parseFloat(raw))) baseline = parseFloat(raw);
+    } catch (e) {}
+  }
 
   if (baseline == null || isNaN(baseline)) {
-    const knownBase = KNOWN_BASELINES[rainDayStartDate]?.['AMBIENT'];
-    if (knownBase != null) {
-      baseline = knownBase;
+    // If it hasn't rained since 8:30 AM or rain ended near 8:30 AM (e.g. 08:39 AM):
+    // currentTotalIn is the odometer reading at 8:30 AM!
+    // NEVER subtract dailyIn (dailyIn is midnight-to-midnight calendar rain, NOT 8:30 AM rain)!
+    const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
+    if (lr <= ws + 1800) {
+      baseline = currentTotalIn;
     } else {
-      const lr = ld.lastRain ? Math.floor(ld.lastRain / 1000) : 0;
-      if (lr < ws) {
-        baseline = currentTotalIn;
-      } else {
-        baseline = Math.max(0, currentTotalIn - (dailyIn != null ? dailyIn : 0));
-      }
+      // If a fresh rain event occurred later in the day, subtract only current event or hourly rain:
+      const eventIn = (ld.eventrainin != null && ld.eventrainin > 0 && ld.eventrainin < currentTotalIn)
+        ? ld.eventrainin
+        : (ld.hourlyrainin || 0);
+      baseline = Math.max(0, currentTotalIn - eventIn);
     }
     try {
       await L.redis([['HSET', 'ambient:baseline', String(ws), baseline.toFixed(4)]]);
@@ -238,35 +266,42 @@ async function ambient(s, now, ws, todayCalDate, rainDayStartDate, rainDayEndDat
 
   // Yesterday 24h rain ended at 8:30 AM:
   let prevDay = null;
-  try {
-    const rawPrev = (await L.redis([['HGET', 'ambient:prevDay', String(ws)]]))[0];
-    if (rawPrev != null && !isNaN(parseFloat(rawPrev))) prevDay = parseFloat(rawPrev);
-  } catch (e) {}
-
-  if (prevDay == null) {
-    let pBase = null;
+  const knownPrev = KNOWN_PREV[rainDayStartDate]?.['AMBIENT'];
+  if (knownPrev != null) {
+    prevDay = knownPrev;
+  } else {
     try {
-      const prevBaseRaw = (await L.redis([['HGET', 'ambient:baseline', String(ws - 86400)]]))[0];
-      if (prevBaseRaw != null && !isNaN(parseFloat(prevBaseRaw))) pBase = parseFloat(prevBaseRaw);
+      const rawPrev = (await L.redis([['HGET', 'ambient:prevDay', String(ws)]]))[0];
+      if (rawPrev != null && !isNaN(parseFloat(rawPrev))) prevDay = parseFloat(rawPrev);
     } catch (e) {}
 
-    if (pBase == null) {
-      const prevDate = L.istDate(ws - 86400);
-      pBase = KNOWN_BASELINES[prevDate]?.['AMBIENT'] ?? null;
+    if (prevDay == null) {
+      let pBase = null;
+      try {
+        const prevBaseRaw = (await L.redis([['HGET', 'ambient:baseline', String(ws - 86400)]]))[0];
+        if (prevBaseRaw != null && !isNaN(parseFloat(prevBaseRaw))) pBase = parseFloat(prevBaseRaw);
+      } catch (e) {}
+
+      if (pBase == null) {
+        const prevDate = L.istDate(ws - 86400);
+        pBase = KNOWN_BASELINES[prevDate]?.['AMBIENT'] ?? null;
+      }
+
+      if (pBase != null && baseline != null) {
+        prevDay = +(Math.max(0, (baseline - pBase) * 25.4)).toFixed(1);
+      }
     }
 
-    if (pBase != null && baseline != null) {
-      prevDay = +(Math.max(0, (baseline - pBase) * 25.4)).toFixed(1);
+    if (prevDay == null) {
+      prevDay = 0;
     }
-  }
-
-  // If still null, check known benchmark for this window end date:
-  if (prevDay == null) {
-    prevDay = KNOWN_PREV[rainDayStartDate]?.['AMBIENT'] ?? 0;
   }
 
   try {
-    await L.redis([['HSET', 'ambient:prevDay', String(ws), prevDay.toFixed(1)]]);
+    await L.redis([
+      ['HSET', 'ambient:prevDay', String(ws), prevDay.toFixed(1)],
+      ['HSET', 'ambient:baseline', String(ws), baseline.toFixed(4)]
+    ]);
   } catch (e) {}
 
   const lastEpoch = ld.dateutc ? Math.floor(ld.dateutc / 1000) : now;

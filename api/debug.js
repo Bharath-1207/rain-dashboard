@@ -7,6 +7,21 @@ module.exports = async (req, res) => {
 
   const { station, action } = req.query;
 
+  if (action === 'ambient') {
+    const baseline = (await L.redis([['HGETALL', 'ambient:baseline']]))[0];
+    const prevDay = (await L.redis([['HGETALL', 'ambient:prevDay']]))[0];
+    const lastValid = (await L.redis([['HGETALL', 'ambient:last_valid']]))[0];
+    return res.json({ baseline, prevDay, lastValid });
+  }
+
+  if (action === 'set-ambient') {
+    const { key, field, value } = req.query;
+    if (key && field && value != null) {
+      await L.redis([['HSET', key, field, value]]);
+      return res.json({ set: { key, field, value } });
+    }
+  }
+
   if (action === 'del' && station) {
     await L.redis([['DEL', 'rain:' + station]]);
     return res.json({ deleted: station });
